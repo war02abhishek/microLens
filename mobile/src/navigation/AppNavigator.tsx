@@ -1,39 +1,31 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
+import TabNavigator from "./TabNavigator";
 import OnboardingScreen from "../screens/OnboardingScreen";
-import DashboardScreen from "../screens/DashboardScreen";
-import MealCaptureScreen from "../screens/MealCaptureScreen";
-import MealReviewScreen from "../screens/MealReviewScreen";
-import HistoryScreen from "../screens/HistoryScreen";
-import ThemeGalleryScreen from "../screens/ThemeGalleryScreen";
-import ProfileScreen from "../screens/ProfileScreen";
+import CaptureScreen from "../screens/CaptureScreen";
+import AIResultScreen from "../screens/AIResultScreen";
 
 export type RootStackParamList = {
+  Tabs: undefined;
   Onboarding: undefined;
-  Dashboard: undefined;
-  MealCapture: undefined;
-  MealReview: undefined;
-  History: undefined;
-  ThemeGallery: undefined;
-  Profile: undefined;
+  Capture: undefined;
+  AIResult: { mode: "photo" | "text"; description?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// TODO once onboarding state is wired up: gate the initial route on
-// whether the user has completed onboarding (AsyncStorage / profile check).
+// TODO: gate initialRouteName on a persisted "has onboarded" flag once
+// profile data is synced with the backend — for now every launch starts
+// at Onboarding, matching the design handoff's default state.
 export default function AppNavigator() {
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="Onboarding">
-        <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="MealCapture" component={MealCaptureScreen} options={{ title: "Log a meal" }} />
-        <Stack.Screen name="MealReview" component={MealReviewScreen} options={{ title: "Confirm" }} />
-        <Stack.Screen name="History" component={HistoryScreen} options={{ title: "History" }} />
-        <Stack.Screen name="ThemeGallery" component={ThemeGalleryScreen} options={{ title: "Themes" }} />
-        <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
+      <Stack.Navigator initialRouteName="Onboarding" screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Tabs" component={TabNavigator} />
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ presentation: "fullScreenModal" }} />
+        <Stack.Screen name="Capture" component={CaptureScreen} options={{ presentation: "fullScreenModal" }} />
+        <Stack.Screen name="AIResult" component={AIResultScreen} options={{ presentation: "fullScreenModal" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -1,33 +1,37 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
-import { themes, defaultThemeId, type ThemeColors } from "./themes";
+import { THEMES, defaultThemeKey, type ThemeKey, type ThemeTokens } from "./themes";
 
 type ThemeContextValue = {
-  themeId: string;
-  colors: ThemeColors;
-  accentColor: string;
-  setThemeId: (id: string) => void;
-  setAccentColor: (color: string) => void;
+  themeKey: ThemeKey;
+  theme: ThemeTokens;
+  setThemeKey: (key: ThemeKey) => void;
+  setAccent: (color: string) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-// PRD §3.4: themes apply instantly with a smooth transition. This context
-// is the seam a cross-fade animation would hook into once designs land.
+// PRD §3.4: themes apply instantly with a smooth cross-fade. Screens read
+// `theme` (tokens + the current accent already merged in) and rely on RN's
+// Animated/LayoutAnimation for the transition — see screens for usage.
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeId, setThemeId] = useState(defaultThemeId);
-  const [accentColor, setAccentColor] = useState(themes[defaultThemeId].accent);
+  const [themeKey, setThemeKeyState] = useState<ThemeKey>(defaultThemeKey);
+  const [accentOverride, setAccentOverride] = useState<string | null>(null);
 
-  const value = useMemo<ThemeContextValue>(
-    () => ({
-      themeId,
-      colors: themes[themeId] ?? themes[defaultThemeId],
-      accentColor,
-      setThemeId,
-      setAccentColor,
-    }),
-    [themeId, accentColor],
-  );
+  const setThemeKey = (key: ThemeKey) => {
+    setThemeKeyState(key);
+    setAccentOverride(null); // picking a theme resets to its default accent
+  };
+
+  const value = useMemo<ThemeContextValue>(() => {
+    const base = THEMES[themeKey];
+    return {
+      themeKey,
+      theme: { ...base, accent: accentOverride ?? base.accent },
+      setThemeKey,
+      setAccent: setAccentOverride,
+    };
+  }, [themeKey, accentOverride]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
