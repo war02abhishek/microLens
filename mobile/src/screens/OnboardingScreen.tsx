@@ -129,12 +129,14 @@ function StatField({
   value,
   onChangeText,
   unit,
+  keyboardType = "numeric",
 }: {
   theme: ReturnType<typeof useTheme>["theme"];
   label: string;
   value: string;
   onChangeText: (v: string) => void;
   unit: string;
+  keyboardType?: "numeric" | "default";
 }) {
   return (
     <View style={[styles.statField, { backgroundColor: theme.surface, borderColor: theme.line }]}>
@@ -143,7 +145,8 @@ function StatField({
         <TextInput
           value={value}
           onChangeText={onChangeText}
-          keyboardType="numeric"
+          keyboardType={keyboardType}
+          selectTextOnFocus
           style={[styles.statFieldInput, { color: theme.ink, fontFamily: FONT_DISPLAY }]}
         />
         <Text style={[styles.statFieldUnit, { color: theme.muted, fontFamily: bodyFont(600) }]}>{unit}</Text>
@@ -197,7 +200,7 @@ function OnbStats({
       </View>
       <View style={styles.statRow}>
         <StatField theme={theme} label="Age" value={age} onChangeText={setAge} unit="yrs" />
-        <StatField theme={theme} label="Height" value={height} onChangeText={setHeight} unit="" />
+        <StatField theme={theme} label="Height" value={height} onChangeText={setHeight} unit="" keyboardType="default" />
       </View>
       <View style={styles.statRow}>
         <StatField theme={theme} label="Weight" value={weight} onChangeText={setWeight} unit="lb" />
