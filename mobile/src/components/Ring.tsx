@@ -29,7 +29,7 @@ export default function Ring({ size, stroke, pct, color, track, cap = "round" }:
         strokeDasharray={`${c}, ${c}`}
         strokeDashoffset={c * (1 - clamped)}
         rotation={-90}
-        origin={`${size / 2}, ${size / 2}`}
+        origin={[size / 2, size / 2]}
       />
     </Svg>
   );

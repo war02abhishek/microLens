@@ -31,6 +31,7 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
     return (
       <TouchableOpacity
         key={route.key}
+        testID={`tab-${route.name}`}
         style={styles.tab}
         activeOpacity={0.7}
         onPress={() => navigation.navigate(route.name)}
@@ -57,6 +58,7 @@ export default function CustomTabBar({ state, navigation }: BottomTabBarProps) {
         {routes.slice(0, 2).map((r, i) => renderTab(r, i))}
         <View style={styles.fabSlot}>
           <TouchableOpacity
+            testID="tab-fab"
             style={[styles.fab, { backgroundColor: theme.accent, borderColor: theme.bg, shadowColor: theme.accent }]}
             activeOpacity={0.85}
             onPress={() => navigation.getParent()?.navigate("Capture" as never)}

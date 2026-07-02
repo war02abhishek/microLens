@@ -80,6 +80,7 @@ export default function CaptureScreen() {
               <Icon name="gallery" size={22} color={theme.muted} />
             </View>
             <Pressable
+              testID="shutter-btn"
               style={[styles.shutter, { backgroundColor: theme.accent, borderColor: theme.surface, shadowColor: theme.accent }]}
               onPress={() => analyze("photo")}
             >
@@ -103,6 +104,7 @@ export default function CaptureScreen() {
                 <Icon name="mic" size={20} color={theme.muted} />
               </Pressable>
               <Pressable
+                testID="send-btn"
                 style={[styles.sendBtn, { backgroundColor: theme.accent }]}
                 onPress={() => analyze("text")}
                 disabled={!text.trim()}

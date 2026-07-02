@@ -41,19 +41,23 @@ export default function OnboardingScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      <View style={styles.progressRow}>
-        {Array.from({ length: STEPS }).map((_, i) => (
-          <View
-            key={i}
-            style={[styles.progressBar, { backgroundColor: i <= step ? theme.accent : theme.surface2 }]}
-          />
-        ))}
+      <View style={styles.headerRow}>
+        {step > 0 ? (
+          <Pressable style={styles.backBtn} onPress={back}>
+            <Icon name="chevL" size={22} color={theme.muted} />
+          </Pressable>
+        ) : (
+          <View style={styles.backBtnSpacer} />
+        )}
+        <View style={styles.progressRow}>
+          {Array.from({ length: STEPS }).map((_, i) => (
+            <View
+              key={i}
+              style={[styles.progressBar, { backgroundColor: i <= step ? theme.accent : theme.surface2 }]}
+            />
+          ))}
+        </View>
       </View>
-      {step > 0 && (
-        <Pressable style={styles.backBtn} onPress={back}>
-          <Icon name="chevL" size={22} color={theme.muted} />
-        </Pressable>
-      )}
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {step === 0 && <OnbWelcome theme={theme} />}
@@ -360,9 +364,11 @@ function OnbTheme({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  progressRow: { flexDirection: "row", gap: 6, paddingTop: 62, paddingHorizontal: 24, paddingBottom: 8 },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 62, paddingHorizontal: 18, paddingBottom: 8 },
+  progressRow: { flex: 1, flexDirection: "row", gap: 6 },
   progressBar: { flex: 1, height: 5, borderRadius: 9 },
-  backBtn: { position: "absolute", top: 96, left: 18, width: 38, height: 38, alignItems: "center", justifyContent: "center", zIndex: 2 },
+  backBtn: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
+  backBtnSpacer: { width: 30 },
   body: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 24 },
   ctaWrap: { paddingHorizontal: 24, paddingTop: 14, paddingBottom: 30 },
   cta: {
