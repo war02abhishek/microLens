@@ -1,7 +1,7 @@
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import Icon from "../components/Icon";
 import { useTheme } from "../theme/ThemeContext";
@@ -9,6 +9,7 @@ import { bodyFont, FONT_DISPLAY } from "../theme/typography";
 import { CONFIDENCE, MACRO_COLORS, type ConfidenceLevel } from "../theme/themes";
 import { fmt } from "../hooks/useProgress";
 import { useMealLog } from "../context/MealLogContext";
+import { analyzeText, createMeal, type MealItemDraft } from "../api/mealApi";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
 type Item = {
@@ -22,31 +23,70 @@ type Item = {
   conf: ConfidenceLevel;
 };
 
-// Sample AI output — the prototype simulates the model with a scripted
-// result. TODO: replace with a real call to api/mealApi.ts
-// (analyzePhoto/analyzeText), which hits the backend's OpenAI vision +
-// nutrition-DB pipeline (backend/internal/ai + internal/nutrition).
-const SAMPLE_ITEMS: Item[] = [
-  { id: "a", name: "Grilled chicken breast", qty: "180 g", cal: 297, p: 56, c: 0, f: 6.5, conf: "high" },
-  { id: "b", name: "Mixed greens", qty: "80 g", cal: 16, p: 2, c: 3, f: 0, conf: "high" },
-  { id: "c", name: "Cherry tomatoes", qty: "60 g", cal: 11, p: 1, c: 2, f: 0, conf: "med" },
-  { id: "d", name: "Olive-oil dressing", qty: "15 g", cal: 124, p: 0, c: 0, f: 14, conf: "low" },
-  { id: "e", name: "Feta crumbles", qty: "30 g", cal: 80, p: 4, c: 1, f: 6, conf: "med" },
-];
+function confidenceLevel(c: number): ConfidenceLevel {
+  if (c >= 0.7) return "high";
+  if (c >= 0.4) return "med";
+  return "low";
+}
+
+function draftToItem(d: MealItemDraft, i: number): Item {
+  return {
+    id: String(i),
+    name: d.food_name,
+    qty: `${d.quantity_value} ${d.quantity_unit}`,
+    cal: Math.round(d.calories),
+    p: Math.round(d.protein_g),
+    c: Math.round(d.carbs_g),
+    f: Math.round(d.fat_g),
+    conf: confidenceLevel(d.confidence),
+  };
+}
 
 type AIResultRoute = RouteProp<RootStackParamList, "AIResult">;
+type Phase = "scan" | "result" | "error";
 
 export default function AIResultScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<AIResultRoute>();
   const { addMeal } = useMealLog();
-  const [phase, setPhase] = useState<"scan" | "result">("scan");
-  const [items, setItems] = useState<Item[]>(SAMPLE_ITEMS);
+  const [phase, setPhase] = useState<Phase>("scan");
+  const [items, setItems] = useState<Item[]>([]);
+  const [mealName, setMealName] = useState("Logged meal");
+  const [error, setError] = useState<string | null>(null);
+  const [savingError, setSavingError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const id = setTimeout(() => setPhase("result"), 2100);
-    return () => clearTimeout(id);
+    const { mode, description } = route.params ?? { mode: "text" as const };
+
+    if (mode === "photo") {
+      setError("Photo capture isn't wired up yet — go back and use Describe instead.");
+      setPhase("error");
+      return;
+    }
+    if (!description || !description.trim()) {
+      setError("Type a description first.");
+      setPhase("error");
+      return;
+    }
+
+    let cancelled = false;
+    analyzeText(description)
+      .then((draft) => {
+        if (cancelled) return;
+        setItems(draft.items.map(draftToItem));
+        setMealName(draft.items[0]?.food_name ?? "Logged meal");
+        setPhase("result");
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "AI request failed");
+        setPhase("error");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const totals = items.reduce(
@@ -58,15 +98,47 @@ export default function AIResultScreen() {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, cal: Math.max(0, it.cal + delta) } : it)));
   };
 
-  const onSave = () => {
-    addMeal("Grilled chicken salad", totals);
-    // Capture + AIResult are both pushed on the root stack above Tabs —
-    // popToTop dismisses both and lands back on the dashboard.
-    navigation.popToTop();
+  const onSave = async () => {
+    setSaving(true);
+    setSavingError(null);
+    try {
+      const draftItems: MealItemDraft[] = items.map((it) => ({
+        food_name: it.name,
+        quantity_value: parseFloat(it.qty) || 0,
+        quantity_unit: it.qty.split(" ")[1] ?? "g",
+        calories: it.cal,
+        protein_g: it.p,
+        carbs_g: it.c,
+        fat_g: it.f,
+        confidence: it.conf === "high" ? 0.9 : it.conf === "med" ? 0.5 : 0.2,
+      }));
+      await createMeal({ source: "text", items: draftItems });
+      addMeal(mealName, totals);
+      // Capture + AIResult are both pushed on the root stack above Tabs —
+      // popToTop dismisses both and lands back on the dashboard.
+      navigation.popToTop();
+    } catch (e) {
+      setSavingError(e instanceof Error ? e.message : "Failed to save meal");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (phase === "scan") {
     return <ScanningState theme={theme} />;
+  }
+
+  if (phase === "error") {
+    return (
+      <View style={[styles.container, styles.errorContainer, { backgroundColor: theme.bg }]}>
+        <Icon name="x" size={32} color="#ff5a5f" />
+        <Text style={[styles.errorTitle, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Couldn't analyze that meal</Text>
+        <Text style={[styles.errorMessage, { color: theme.muted, fontFamily: bodyFont(500) }]}>{error}</Text>
+        <Pressable style={[styles.errorBtn, { backgroundColor: theme.accent }]} onPress={() => navigation.goBack()}>
+          <Text style={[styles.errorBtnText, { fontFamily: bodyFont(700) }]}>Back to capture</Text>
+        </Pressable>
+      </View>
+    );
   }
 
   return (
@@ -87,7 +159,9 @@ export default function AIResultScreen() {
           <View style={styles.heroRow}>
             <View style={styles.heroThumb} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.heroTitle, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Grilled chicken salad</Text>
+              <Text style={[styles.heroTitle, { color: theme.ink, fontFamily: FONT_DISPLAY }]} numberOfLines={1}>
+                {mealName}
+              </Text>
               <Text style={[styles.heroSub, { color: theme.muted, fontFamily: bodyFont(600) }]}>{items.length} items detected</Text>
             </View>
             <View style={{ alignItems: "flex-end" }}>
@@ -156,15 +230,28 @@ export default function AIResultScreen() {
         <View style={[styles.confHint, { backgroundColor: `${theme.accent}12` }]}>
           <Icon name="sparkle" size={16} color={theme.accent} />
           <Text style={[styles.confHintText, { color: theme.muted, fontFamily: bodyFont(600) }]}>
-            Flagged items are lower-confidence — dressing amounts vary. Adjust before saving.
+            Flagged items are lower-confidence. Adjust before saving.
           </Text>
         </View>
+        {savingError && (
+          <Text style={[styles.errorMessage, { color: "#ff5a5f", marginTop: 12 }]}>{savingError}</Text>
+        )}
       </ScrollView>
 
       <View style={[styles.saveBar, { backgroundColor: theme.surface, borderTopColor: theme.line }]}>
-        <Pressable style={[styles.saveBtn, { backgroundColor: theme.accent }]} onPress={onSave}>
-          <Icon name="check" size={20} color="#fff" strokeWidth={2.6} />
-          <Text style={[styles.saveBtnText, { fontFamily: FONT_DISPLAY }]}>Log this meal · {fmt(totals.cal)} kcal</Text>
+        <Pressable
+          style={[styles.saveBtn, { backgroundColor: theme.accent }, saving && { opacity: 0.6 }]}
+          onPress={onSave}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Icon name="check" size={20} color="#fff" strokeWidth={2.6} />
+              <Text style={[styles.saveBtnText, { fontFamily: FONT_DISPLAY }]}>Log this meal · {fmt(totals.cal)} kcal</Text>
+            </>
+          )}
         </Pressable>
       </View>
     </View>
@@ -260,6 +347,11 @@ function ScanningState({ theme }: { theme: ReturnType<typeof useTheme>["theme"] 
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  errorContainer: { alignItems: "center", justifyContent: "center", paddingHorizontal: 32, gap: 12 },
+  errorTitle: { fontSize: 20, fontWeight: "700", textAlign: "center" },
+  errorMessage: { fontSize: 14, fontWeight: "500", textAlign: "center", lineHeight: 20 },
+  errorBtn: { marginTop: 12, paddingVertical: 14, paddingHorizontal: 24, borderRadius: 14 },
+  errorBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 60, paddingHorizontal: 20, paddingBottom: 14 },
   backBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   aiPill: { flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderRadius: 99, paddingVertical: 7, paddingHorizontal: 13 },

@@ -1,13 +1,25 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
-// Per dev-playbook: always fall back to production, never emulator
-// localhost. Set EXPO_PUBLIC_API_URL in app config / eas.json per
-// environment once the backend has a real deploy URL.
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://your-backend.onrender.com";
+// Per dev-playbook: never hardcode 10.0.2.2 blindly — but do use it as the
+// *dev-only* fallback for the Android emulator (its alias for the host
+// machine's localhost), since `docker compose up` runs the backend on the
+// host, not in the emulator. Once there's a real deployed backend, set
+// EXPO_PUBLIC_API_URL (app config / eas.json) and it always wins over both
+// dev fallbacks.
+function resolveBaseURL(): string {
+  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  if (__DEV__) {
+    return Platform.OS === "android" ? "http://10.0.2.2:8080" : "http://localhost:8080";
+  }
+  return "https://your-backend.onrender.com";
+}
+
+const BASE_URL = resolveBaseURL();
 
 const AUTH_TOKEN_KEY = "macrolens.authToken";
 
-async function getAuthToken(): Promise<string | null> {
+export async function getAuthToken(): Promise<string | null> {
   return AsyncStorage.getItem(AUTH_TOKEN_KEY);
 }
 

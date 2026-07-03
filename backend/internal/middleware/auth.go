@@ -8,15 +8,18 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Claims embedded in the access token issued at login/refresh.
+// Claims embedded in tokens issued at signup/login/refresh. TokenType
+// distinguishes access tokens (short-lived, required for API calls) from
+// refresh tokens (long-lived, only accepted by POST /auth/refresh).
 type Claims struct {
-	UserID string `json:"user_id"`
+	UserID    string `json:"user_id"`
+	TokenType string `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
 // RequireAuth validates the bearer token and sets "user_id" in the request
-// context. TODO: wire up real token issuance/refresh once Supabase Auth
-// (or a custom JWT flow) is decided.
+// context. Only "access" tokens are accepted here — a refresh token
+// presented as a bearer token is rejected.
 func RequireAuth(jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
@@ -30,7 +33,7 @@ func RequireAuth(jwtSecret string) gin.HandlerFunc {
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
 			return []byte(jwtSecret), nil
 		})
-		if err != nil || !token.Valid {
+		if err != nil || !token.Valid || claims.TokenType != "access" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}

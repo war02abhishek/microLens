@@ -1,38 +1,140 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import Icon, { type IconName } from "../components/Icon";
 import Ring from "../components/Ring";
 import { useTheme } from "../theme/ThemeContext";
+import { useAuth } from "../context/AuthContext";
+import { useMealLog } from "../context/MealLogContext";
 import { bodyFont, FONT_DISPLAY } from "../theme/typography";
 import { ACCENTS, THEMES, type ThemeKey } from "../theme/themes";
 import { useProgress, fmt } from "../hooks/useProgress";
 import { MACRO_COLORS } from "../theme/themes";
+import {
+  feetInchesToCm,
+  formatHeightFtIn,
+  formatWeightKg,
+  formatWeightLb,
+  kgToLb,
+  lbToKg,
+  parseHeightFtIn,
+} from "../utils/units";
+import { upsertProfile, type Profile } from "../api/profileApi";
+import { recalculateGoals, type Goals } from "../api/goalApi";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
 const STEPS = 6;
+type Sex = "female" | "male" | "other";
+type HeightUnit = "ftin" | "cm";
+type WeightUnit = "lb" | "kg";
+
+function parseHeightToCm(text: string, unit: HeightUnit): number | null {
+  if (unit === "cm") {
+    const n = parseFloat(text);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  return parseHeightFtIn(text);
+}
+
+function parseWeightToKg(text: string, unit: WeightUnit): number | null {
+  const n = parseFloat(text);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return unit === "kg" ? n : lbToKg(n);
+}
 
 export default function OnboardingScreen() {
   const { theme, themeKey, setThemeKey, setAccent } = useTheme();
+  const { ensureDeviceAccount } = useAuth();
+  const { refreshTargets } = useMealLog();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [step, setStep] = useState(0);
-  const [sex, setSex] = useState<"female" | "male" | "other">("female");
-  const [activity, setActivity] = useState("high");
-  const [goal, setGoal] = useState("muscle");
 
-  const finish = () => {
-    // Reset the stack so Tabs is the new root — Capture/AIResult later
-    // popToTop() back to it. TODO: persist profile + goals to the backend
-    // (POST /profile, POST /goals/recalculate) before leaving onboarding.
+  const [sex, setSex] = useState<Sex>("female");
+  const [ageText, setAgeText] = useState("28");
+  const [heightUnit, setHeightUnit] = useState<HeightUnit>("ftin");
+  const [heightText, setHeightText] = useState(`5'7"`);
+  const [weightUnit, setWeightUnit] = useState<WeightUnit>("lb");
+  const [weightText, setWeightText] = useState("148");
+  const [targetText, setTargetText] = useState("150");
+  const [activity, setActivity] = useState<Profile["activity_level"]>("active");
+  const [goal, setGoal] = useState<Profile["goal"]>("build_muscle");
+
+  const [computedGoals, setComputedGoals] = useState<Goals | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const changeHeightUnit = (unit: HeightUnit) => {
+    const cm = parseHeightToCm(heightText, heightUnit) ?? feetInchesToCm(5, 7);
+    setHeightText(unit === "cm" ? String(Math.round(cm)) : formatHeightFtIn(cm));
+    setHeightUnit(unit);
+  };
+
+  const changeWeightUnit = (unit: WeightUnit) => {
+    const w = parseWeightToKg(weightText, weightUnit) ?? 67;
+    const t = parseWeightToKg(targetText, weightUnit) ?? w;
+    setWeightText(unit === "kg" ? formatWeightKg(w) : formatWeightLb(w));
+    setTargetText(unit === "kg" ? formatWeightKg(t) : formatWeightLb(t));
+    setWeightUnit(unit);
+  };
+
+  // Saves the profile and recomputes real goals against the backend
+  // (Mifflin-St Jeor — backend/internal/goals/calculator.go). Runs once,
+  // right before the Reveal step, so the animated numbers are real.
+  const saveProfileAndComputeGoals = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await ensureDeviceAccount();
+
+      const heightCm = parseHeightToCm(heightText, heightUnit) ?? feetInchesToCm(5, 7);
+      const weightKg = parseWeightToKg(weightText, weightUnit) ?? 67;
+      const targetWeightKg = parseWeightToKg(targetText, weightUnit) ?? undefined;
+      const age = parseInt(ageText, 10) || 28;
+
+      await upsertProfile({
+        display_name: "",
+        age,
+        sex: sex === "other" ? "female" : sex, // backend models sex as male/female today
+        height_cm: heightCm,
+        weight_kg: weightKg,
+        activity_level: activity,
+        goal,
+        target_weight_kg: targetWeightKg,
+        theme_id: themeKey,
+        accent_color: theme.accent,
+      });
+
+      const goals = await recalculateGoals();
+      setComputedGoals(goals);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to reach the backend");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const finish = async () => {
+    await refreshTargets().catch(() => {});
+    // Capture/AIResult are pushed on the root stack above Tabs; reset so
+    // Tabs is the new root, then open Capture for the guided first log.
     navigation.reset({ index: 0, routes: [{ name: "Tabs" }] });
     setTimeout(() => navigation.navigate("Capture"), 60);
   };
 
-  const next = () => {
-    if (step < STEPS - 1) setStep(step + 1);
-    else finish();
+  const next = async () => {
+    if (step === 3) {
+      // leaving the Goal step, entering Reveal — compute real targets first
+      await saveProfileAndComputeGoals();
+      setStep(step + 1);
+      return;
+    }
+    if (step < STEPS - 1) {
+      setStep(step + 1);
+    } else {
+      await finish();
+    }
   };
   const back = () => step > 0 && setStep(step - 1);
 
@@ -61,18 +163,36 @@ export default function OnboardingScreen() {
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {step === 0 && <OnbWelcome theme={theme} />}
-        {step === 1 && <OnbStats theme={theme} sex={sex} setSex={setSex} />}
+        {step === 1 && (
+          <OnbStats
+            theme={theme}
+            sex={sex}
+            setSex={setSex}
+            ageText={ageText}
+            setAgeText={setAgeText}
+            heightUnit={heightUnit}
+            heightText={heightText}
+            setHeightText={setHeightText}
+            onToggleHeightUnit={changeHeightUnit}
+            weightUnit={weightUnit}
+            weightText={weightText}
+            setWeightText={setWeightText}
+            targetText={targetText}
+            setTargetText={setTargetText}
+            onToggleWeightUnit={changeWeightUnit}
+          />
+        )}
         {step === 2 && (
           <OnbChoice
             theme={theme}
             title="How active are you?"
             sub="We use this to fine-tune your daily energy."
             value={activity}
-            setValue={setActivity}
+            setValue={(v) => setActivity(v as Profile["activity_level"])}
             options={[
-              ["low", "Mostly sedentary", "Desk job, little exercise", "user"],
-              ["mid", "Lightly active", "Walks, 1–2 workouts / week", "trend"],
-              ["high", "Very active", "Training 3–5× / week", "bolt"],
+              ["sedentary", "Mostly sedentary", "Desk job, little exercise", "user"],
+              ["light", "Lightly active", "Walks, 1–2 workouts / week", "trend"],
+              ["active", "Very active", "Training 3–5× / week", "bolt"],
             ]}
           />
         )}
@@ -82,24 +202,34 @@ export default function OnboardingScreen() {
             title="What's your goal?"
             sub="This sets your calorie balance and macro split."
             value={goal}
-            setValue={setGoal}
+            setValue={(v) => setGoal(v as Profile["goal"])}
             options={[
-              ["fat", "Lose fat", "Gentle calorie deficit", "flame"],
+              ["lose_fat", "Lose fat", "Gentle calorie deficit", "flame"],
               ["maintain", "Maintain", "Stay at your weight", "target"],
-              ["muscle", "Build muscle", "Slight surplus, high protein", "bolt"],
+              ["build_muscle", "Build muscle", "Slight surplus, high protein", "bolt"],
             ]}
           />
         )}
-        {step === 4 && <OnbReveal theme={theme} />}
+        {step === 4 && <OnbReveal theme={theme} goals={computedGoals} saving={saving} error={error} />}
         {step === 5 && (
           <OnbTheme theme={theme} themeKey={themeKey} setThemeKey={setThemeKey} setAccent={setAccent} />
         )}
       </ScrollView>
 
       <View style={styles.ctaWrap}>
-        <Pressable style={[styles.cta, { backgroundColor: theme.accent, shadowColor: theme.accent }]} onPress={next}>
-          <Text style={[styles.ctaText, { fontFamily: FONT_DISPLAY }]}>{ctaLabel}</Text>
-          {step === STEPS - 1 && <Icon name="camera" size={19} color="#fff" />}
+        <Pressable
+          style={[styles.cta, { backgroundColor: theme.accent, shadowColor: theme.accent }, saving && { opacity: 0.6 }]}
+          onPress={next}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Text style={[styles.ctaText, { fontFamily: FONT_DISPLAY }]}>{ctaLabel}</Text>
+              {step === STEPS - 1 && <Icon name="camera" size={19} color="#fff" />}
+            </>
+          )}
         </Pressable>
       </View>
     </View>
@@ -123,6 +253,37 @@ function OnbWelcome({ theme }: { theme: ReturnType<typeof useTheme>["theme"] }) 
   );
 }
 
+function UnitToggle<U extends string>({
+  theme,
+  options,
+  value,
+  onChange,
+}: {
+  theme: ReturnType<typeof useTheme>["theme"];
+  options: readonly U[];
+  value: U;
+  onChange: (u: U) => void;
+}) {
+  return (
+    <View style={[styles.unitToggle, { backgroundColor: theme.surface2 }]}>
+      {options.map((opt) => {
+        const active = opt === value;
+        return (
+          <Pressable
+            key={opt}
+            onPress={() => onChange(opt)}
+            style={[styles.unitToggleBtn, active && { backgroundColor: theme.accent }]}
+          >
+            <Text style={[styles.unitToggleText, { color: active ? "#fff" : theme.muted, fontFamily: bodyFont(700) }]}>
+              {opt}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function StatField({
   theme,
   label,
@@ -130,6 +291,7 @@ function StatField({
   onChangeText,
   unit,
   keyboardType = "numeric",
+  unitToggle,
 }: {
   theme: ReturnType<typeof useTheme>["theme"];
   label: string;
@@ -137,10 +299,14 @@ function StatField({
   onChangeText: (v: string) => void;
   unit: string;
   keyboardType?: "numeric" | "default";
+  unitToggle?: React.ReactNode;
 }) {
   return (
     <View style={[styles.statField, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-      <Text style={[styles.statFieldLabel, { color: theme.muted, fontFamily: bodyFont(600) }]}>{label}</Text>
+      <View style={styles.statFieldHeaderRow}>
+        <Text style={[styles.statFieldLabel, { color: theme.muted, fontFamily: bodyFont(600) }]}>{label}</Text>
+        {unitToggle}
+      </View>
       <View style={styles.statFieldValueRow}>
         <TextInput
           value={value}
@@ -149,7 +315,7 @@ function StatField({
           selectTextOnFocus
           style={[styles.statFieldInput, { color: theme.ink, fontFamily: FONT_DISPLAY }]}
         />
-        <Text style={[styles.statFieldUnit, { color: theme.muted, fontFamily: bodyFont(600) }]}>{unit}</Text>
+        {unit ? <Text style={[styles.statFieldUnit, { color: theme.muted, fontFamily: bodyFont(600) }]}>{unit}</Text> : null}
       </View>
     </View>
   );
@@ -159,16 +325,35 @@ function OnbStats({
   theme,
   sex,
   setSex,
+  ageText,
+  setAgeText,
+  heightUnit,
+  heightText,
+  setHeightText,
+  onToggleHeightUnit,
+  weightUnit,
+  weightText,
+  setWeightText,
+  targetText,
+  setTargetText,
+  onToggleWeightUnit,
 }: {
   theme: ReturnType<typeof useTheme>["theme"];
-  sex: "female" | "male" | "other";
-  setSex: (s: "female" | "male" | "other") => void;
+  sex: Sex;
+  setSex: (s: Sex) => void;
+  ageText: string;
+  setAgeText: (v: string) => void;
+  heightUnit: HeightUnit;
+  heightText: string;
+  setHeightText: (v: string) => void;
+  onToggleHeightUnit: (u: HeightUnit) => void;
+  weightUnit: WeightUnit;
+  weightText: string;
+  setWeightText: (v: string) => void;
+  targetText: string;
+  setTargetText: (v: string) => void;
+  onToggleWeightUnit: (u: WeightUnit) => void;
 }) {
-  const [age, setAge] = useState("28");
-  const [height, setHeight] = useState(`5'7"`);
-  const [weight, setWeight] = useState("148");
-  const [target, setTarget] = useState("150");
-
   return (
     <View>
       <Text style={[styles.h2, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Tell us about you</Text>
@@ -199,12 +384,31 @@ function OnbStats({
         })}
       </View>
       <View style={styles.statRow}>
-        <StatField theme={theme} label="Age" value={age} onChangeText={setAge} unit="yrs" />
-        <StatField theme={theme} label="Height" value={height} onChangeText={setHeight} unit="" keyboardType="default" />
+        <StatField theme={theme} label="Age" value={ageText} onChangeText={setAgeText} unit="yrs" />
+        <StatField
+          theme={theme}
+          label="Height"
+          value={heightText}
+          onChangeText={setHeightText}
+          unit=""
+          keyboardType="default"
+          unitToggle={
+            <UnitToggle theme={theme} options={["ftin", "cm"] as const} value={heightUnit} onChange={onToggleHeightUnit} />
+          }
+        />
       </View>
       <View style={styles.statRow}>
-        <StatField theme={theme} label="Weight" value={weight} onChangeText={setWeight} unit="lb" />
-        <StatField theme={theme} label="Target" value={target} onChangeText={setTarget} unit="lb" />
+        <StatField
+          theme={theme}
+          label="Weight"
+          value={weightText}
+          onChangeText={setWeightText}
+          unit={weightUnit}
+          unitToggle={
+            <UnitToggle theme={theme} options={["lb", "kg"] as const} value={weightUnit} onChange={onToggleWeightUnit} />
+          }
+        />
+        <StatField theme={theme} label="Target" value={targetText} onChangeText={setTargetText} unit={weightUnit} />
       </View>
     </View>
   );
@@ -264,12 +468,23 @@ function OnbChoice({
   );
 }
 
-function OnbReveal({ theme }: { theme: ReturnType<typeof useTheme>["theme"] }) {
-  const p = useProgress(true, 1300, 200);
+function OnbReveal({
+  theme,
+  goals,
+  saving,
+  error,
+}: {
+  theme: ReturnType<typeof useTheme>["theme"];
+  goals: Goals | null;
+  saving: boolean;
+  error: string | null;
+}) {
+  const p = useProgress(!!goals, 1300, 200);
+  const targets = goals ?? { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
   const macros = [
-    ["Protein", 165, MACRO_COLORS.protein],
-    ["Carbs", 220, MACRO_COLORS.carbs],
-    ["Fat", 73, MACRO_COLORS.fat],
+    ["Protein", targets.protein_g, MACRO_COLORS.protein],
+    ["Carbs", targets.carbs_g, MACRO_COLORS.carbs],
+    ["Fat", targets.fat_g, MACRO_COLORS.fat],
   ] as const;
 
   return (
@@ -283,30 +498,40 @@ function OnbReveal({ theme }: { theme: ReturnType<typeof useTheme>["theme"] }) {
           Here's your daily target
         </Text>
       </View>
-      <View style={styles.revealRingWrap}>
-        <Ring size={200} stroke={16} pct={p} color={theme.accent} track={theme.surface2} />
-        <View style={styles.revealRingCenter}>
-          <Text style={[styles.revealKcal, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>{fmt(p * 2200)}</Text>
-          <Text style={[styles.revealKcalUnit, { color: theme.muted, fontFamily: bodyFont(700) }]}>kcal / day</Text>
-        </View>
-      </View>
-      <View style={styles.revealMacroRow}>
-        {macros.map(([label, value, color]) => (
-          <View key={label} style={[styles.revealMacroTile, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-            <Text style={[styles.revealMacroValue, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>
-              {fmt(p * value)}
-              <Text style={{ fontSize: 12, color: theme.muted }}>g</Text>
-            </Text>
-            <View style={styles.revealMacroLabelRow}>
-              <View style={[styles.dot, { backgroundColor: color }]} />
-              <Text style={[styles.revealMacroLabel, { color: theme.muted, fontFamily: bodyFont(600) }]}>{label}</Text>
+      {saving && !goals && !error ? (
+        <ActivityIndicator style={{ marginTop: 40 }} color={theme.accent} />
+      ) : error ? (
+        <Text style={[styles.errorText, { color: "#ff5a5f" }]}>
+          Couldn't reach the backend ({error}). Check that `docker compose up` is running.
+        </Text>
+      ) : (
+        <>
+          <View style={styles.revealRingWrap}>
+            <Ring size={200} stroke={16} pct={p} color={theme.accent} track={theme.surface2} />
+            <View style={styles.revealRingCenter}>
+              <Text style={[styles.revealKcal, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>{fmt(p * targets.calories)}</Text>
+              <Text style={[styles.revealKcalUnit, { color: theme.muted, fontFamily: bodyFont(700) }]}>kcal / day</Text>
             </View>
           </View>
-        ))}
-      </View>
-      <Text style={[styles.pCopy, { color: theme.muted, fontFamily: bodyFont(500), textAlign: "center", marginTop: 18, marginBottom: 0 }]}>
-        Based on your stats + a slight surplus for muscle gain. You can fine-tune any number later.
-      </Text>
+          <View style={styles.revealMacroRow}>
+            {macros.map(([label, value, color]) => (
+              <View key={label} style={[styles.revealMacroTile, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+                <Text style={[styles.revealMacroValue, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>
+                  {fmt(p * value)}
+                  <Text style={{ fontSize: 12, color: theme.muted }}>g</Text>
+                </Text>
+                <View style={styles.revealMacroLabelRow}>
+                  <View style={[styles.dot, { backgroundColor: color }]} />
+                  <Text style={[styles.revealMacroLabel, { color: theme.muted, fontFamily: bodyFont(600) }]}>{label}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+          <Text style={[styles.pCopy, { color: theme.muted, fontFamily: bodyFont(500), textAlign: "center", marginTop: 18, marginBottom: 0 }]}>
+            Computed from your real stats and goal (Mifflin-St Jeor). You can fine-tune any number later.
+          </Text>
+        </>
+      )}
     </View>
   );
 }
@@ -394,15 +619,20 @@ const styles = StyleSheet.create({
   welcomeSub: { fontSize: 16, fontWeight: "500", textAlign: "center", marginTop: 16, maxWidth: 260, lineHeight: 23 },
   h2: { fontSize: 27, fontWeight: "700", letterSpacing: -0.5, marginBottom: 8, lineHeight: 31 },
   pCopy: { fontSize: 14.5, fontWeight: "500", marginBottom: 22, lineHeight: 21 },
+  errorText: { fontSize: 14, fontWeight: "600", textAlign: "center", marginTop: 40, lineHeight: 20 },
   sexRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
   sexBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, alignItems: "center" },
   sexBtnText: { fontSize: 14, fontWeight: "700" },
   statRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
   statField: { flex: 1, borderRadius: 16, padding: 13, borderWidth: 1 },
+  statFieldHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   statFieldLabel: { fontSize: 12.5, fontWeight: "600" },
   statFieldValueRow: { flexDirection: "row", alignItems: "baseline", gap: 4, marginTop: 3 },
   statFieldInput: { fontSize: 24, fontWeight: "700", padding: 0, minWidth: 40 },
   statFieldUnit: { fontSize: 13, fontWeight: "600" },
+  unitToggle: { flexDirection: "row", borderRadius: 99, padding: 2, gap: 2 },
+  unitToggleBtn: { paddingVertical: 3, paddingHorizontal: 7, borderRadius: 99 },
+  unitToggleText: { fontSize: 10, fontWeight: "700" },
   choiceCard: { flexDirection: "row", alignItems: "center", gap: 14, padding: 16, borderRadius: 18, borderWidth: 1.5 },
   choiceIcon: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   choiceTitle: { fontSize: 16, fontWeight: "700" },

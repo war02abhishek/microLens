@@ -1,8 +1,8 @@
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { LinearGradient } from "expo-linear-gradient";
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import Icon from "../components/Icon";
 import Confetti from "../components/Confetti";
@@ -11,7 +11,7 @@ import { useTheme } from "../theme/ThemeContext";
 import { FONT_DISPLAY, bodyFont } from "../theme/typography";
 import { MACRO_COLORS } from "../theme/themes";
 import { useProgress, fmt } from "../hooks/useProgress";
-import { useMealLog, TARGETS, type LoggedMeal } from "../context/MealLogContext";
+import { useMealLog, type LoggedMeal } from "../context/MealLogContext";
 import Ring from "../components/Ring";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
@@ -19,16 +19,23 @@ const RING_SIZE = 218;
 
 export default function DashboardScreen() {
   const { theme } = useTheme();
-  const { meals, celebrate, saved } = useMealLog();
+  const { meals, targets, celebrate, saved, refreshMeals, refreshTargets } = useMealLog();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const p = useProgress(true, 1150);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshMeals().catch(() => {});
+      refreshTargets().catch(() => {});
+    }, []),
+  );
 
   const consumed = meals.reduce(
     (acc, m) => ({ cal: acc.cal + m.cal, protein: acc.protein + m.p, carbs: acc.carbs + m.c, fat: acc.fat + m.f }),
     { cal: 0, protein: 0, carbs: 0, fat: 0 },
   );
-  const remain = Math.max(0, TARGETS.cal - consumed.cal);
-  const over = consumed.cal > TARGETS.cal;
+  const remain = Math.max(0, targets.cal - consumed.cal);
+  const over = consumed.cal > targets.cal;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
@@ -62,12 +69,12 @@ export default function DashboardScreen() {
       >
         {celebrate && <Confetti colors={[theme.accent, MACRO_COLORS.protein, MACRO_COLORS.carbs, MACRO_COLORS.fat]} />}
         <View style={styles.ringWrap}>
-          <Ring size={RING_SIZE} stroke={16} pct={p * (consumed.cal / TARGETS.cal)} color={theme.accent} track={theme.surface2} />
+          <Ring size={RING_SIZE} stroke={16} pct={p * (consumed.cal / targets.cal)} color={theme.accent} track={theme.surface2} />
           <View style={styles.innerRing}>
             <Ring
               size={RING_SIZE - 42}
               stroke={11}
-              pct={p * (consumed.protein / TARGETS.protein)}
+              pct={p * (consumed.protein / targets.protein)}
               color={MACRO_COLORS.protein}
               track={theme.surface2}
             />
@@ -77,10 +84,10 @@ export default function DashboardScreen() {
               {over ? "OVER BY" : "REMAINING"}
             </Text>
             <Text style={[styles.ringNumber, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>
-              {fmt(p * (over ? consumed.cal - TARGETS.cal : remain))}
+              {fmt(p * (over ? consumed.cal - targets.cal : remain))}
             </Text>
             <Text style={[styles.ringSub, { color: theme.muted, fontFamily: bodyFont(600) }]}>
-              of {TARGETS.cal.toLocaleString()} kcal
+              of {targets.cal.toLocaleString()} kcal
             </Text>
           </View>
         </View>

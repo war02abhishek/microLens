@@ -1,43 +1,71 @@
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useCallback, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 
 import Icon, { type IconName } from "../components/Icon";
 import { useTheme } from "../theme/ThemeContext";
 import { bodyFont, FONT_DISPLAY } from "../theme/typography";
-import { TARGETS } from "../context/MealLogContext";
+import { useMealLog } from "../context/MealLogContext";
+import { getProfile, type Profile } from "../api/profileApi";
+import { formatHeightFtIn, formatWeightLb } from "../utils/units";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
-// TODO: source from GET /profile + GET /goals once wired to the backend.
-const TARGET_ROWS: [IconName, string, string][] = [
-  ["target", "Daily calories", `${TARGETS.cal.toLocaleString()} kcal`],
-  ["bolt", "Protein", `${TARGETS.protein} g`],
-  ["flame", "Carbs", `${TARGETS.carbs} g`],
-  ["sparkle", "Fat", `${TARGETS.fat} g`],
-];
-const STATS: [string, string][] = [
-  ["Age", "28"],
-  ["Height", `5'7"`],
-  ["Weight", "148 lb"],
-  ["Activity", "High"],
-];
+const GOAL_LABEL: Record<Profile["goal"], string> = {
+  lose_fat: "Lose fat",
+  maintain: "Maintain",
+  build_muscle: "Build muscle",
+};
+const ACTIVITY_LABEL: Record<Profile["activity_level"], string> = {
+  sedentary: "Sedentary",
+  light: "Light",
+  moderate: "Moderate",
+  active: "High",
+  very_active: "Very high",
+};
 
 export default function ProfileScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { targets, refreshTargets } = useMealLog();
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshTargets().catch(() => {});
+      getProfile()
+        .then(setProfile)
+        .catch(() => setProfile(null));
+    }, []),
+  );
+
+  const targetRows: [IconName, string, string][] = [
+    ["target", "Daily calories", `${targets.cal.toLocaleString()} kcal`],
+    ["bolt", "Protein", `${targets.protein} g`],
+    ["flame", "Carbs", `${targets.carbs} g`],
+    ["sparkle", "Fat", `${targets.fat} g`],
+  ];
+  const stats: [string, string][] = [
+    ["Age", profile ? String(profile.age) : "—"],
+    ["Height", profile ? formatHeightFtIn(profile.height_cm) : "—"],
+    ["Weight", profile ? `${formatWeightLb(profile.weight_kg)} lb` : "—"],
+    ["Activity", profile ? ACTIVITY_LABEL[profile.activity_level] : "—"],
+  ];
 
   return (
     <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
       <View style={styles.identityRow}>
         <View style={[styles.avatar, { backgroundColor: theme.accent }]}>
-          <Text style={[styles.avatarLetter, { fontFamily: FONT_DISPLAY }]}>M</Text>
+          <Text style={[styles.avatarLetter, { fontFamily: FONT_DISPLAY }]}>{(profile?.display_name || "?")[0]?.toUpperCase()}</Text>
         </View>
         <View>
-          <Text style={[styles.name, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Maya Chen</Text>
-          <View style={[styles.goalChip, { backgroundColor: theme.surface2 }]}>
-            <Icon name="bolt" size={13} color={theme.accent} fill={theme.accent} />
-            <Text style={[styles.goalChipText, { color: theme.ink, fontFamily: bodyFont(700) }]}>Build muscle</Text>
-          </View>
+          <Text style={[styles.name, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>{profile?.display_name || "Your profile"}</Text>
+          {profile && (
+            <View style={[styles.goalChip, { backgroundColor: theme.surface2 }]}>
+              <Icon name="bolt" size={13} color={theme.accent} fill={theme.accent} />
+              <Text style={[styles.goalChipText, { color: theme.ink, fontFamily: bodyFont(700) }]}>{GOAL_LABEL[profile.goal]}</Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -49,7 +77,7 @@ export default function ProfileScreen() {
         </Pressable>
       </View>
       <View style={[styles.targetsCard, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-        {TARGET_ROWS.map(([icon, label, value], i) => (
+        {targetRows.map(([icon, label, value], i) => (
           <View key={label} style={[styles.targetRow, i > 0 && { borderTopWidth: 1, borderTopColor: theme.line }]}>
             <View style={[styles.targetIcon, { backgroundColor: theme.surface2 }]}>
               <Icon name={icon} size={18} color={theme.accent} />
@@ -63,14 +91,14 @@ export default function ProfileScreen() {
       <View style={[styles.derivationNote, { backgroundColor: theme.surface2 }]}>
         <Icon name="sparkle" size={16} color={theme.accent} fill={theme.accent} />
         <Text style={[styles.derivationText, { color: theme.muted, fontFamily: bodyFont(500) }]}>
-          Targets derived from your BMR (1,480) × activity (1.55) + a 250 kcal surplus for muscle gain. Tap any number to
-          override.
+          Targets are computed from your age, height, weight, activity level, and goal (see backend/internal/goals). Tap
+          "Edit" to update your stats and recalculate.
         </Text>
       </View>
 
       <Text style={[styles.sectionTitle, { color: theme.ink, fontFamily: FONT_DISPLAY, marginHorizontal: 2 }]}>Your stats</Text>
       <View style={styles.statsGrid}>
-        {STATS.map(([label, value]) => (
+        {stats.map(([label, value]) => (
           <View key={label} style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.line }]}>
             <Text style={[styles.statLabel, { color: theme.muted, fontFamily: bodyFont(600) }]}>{label}</Text>
             <Text style={[styles.statValue, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>{value}</Text>

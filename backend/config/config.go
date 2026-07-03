@@ -17,7 +17,7 @@ func Load() Config {
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		JWTSecret:        os.Getenv("JWT_SECRET"),
 		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
-		NutritionAPIKey:  os.Getenv("NUTRITION_API_KEY"),
+		NutritionAPIKey:  getEnv("NUTRITION_API_KEY", "DEMO_KEY"),
 		NutritionAPIBase: getEnv("NUTRITION_API_BASE", "https://api.nal.usda.gov/fdc/v1"),
 	}
 }
