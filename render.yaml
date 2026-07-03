@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: macrolens-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      # Point at your hosted Postgres (Supabase Supavisor pooler recommended —
+      # see backend/.env.example for the connection-string format). Set in
+      # the Render dashboard, not committed here.
+      - key: DATABASE_URL
+        sync: false
+      # Render generates a strong random value on first deploy so this is
+      # never left at the "change-me" placeholder the backend refuses to
+      # boot with.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: NUTRITION_API_KEY
+        sync: false
+      - key: NUTRITION_API_BASE
+        value: https://api.nal.usda.gov/fdc/v1
