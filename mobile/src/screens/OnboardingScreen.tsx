@@ -51,6 +51,7 @@ export default function OnboardingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [step, setStep] = useState(0);
 
+  const [name, setName] = useState("");
   const [sex, setSex] = useState<Sex>("female");
   const [ageText, setAgeText] = useState("28");
   const [heightUnit, setHeightUnit] = useState<HeightUnit>("ftin");
@@ -94,7 +95,7 @@ export default function OnboardingScreen() {
       const age = parseInt(ageText, 10) || 28;
 
       await upsertProfile({
-        display_name: "",
+        display_name: name.trim(),
         age,
         sex: sex === "other" ? "female" : sex, // backend models sex as male/female today
         height_cm: heightCm,
@@ -166,6 +167,8 @@ export default function OnboardingScreen() {
         {step === 1 && (
           <OnbStats
             theme={theme}
+            name={name}
+            setName={setName}
             sex={sex}
             setSex={setSex}
             ageText={ageText}
@@ -323,6 +326,8 @@ function StatField({
 
 function OnbStats({
   theme,
+  name,
+  setName,
   sex,
   setSex,
   ageText,
@@ -339,6 +344,8 @@ function OnbStats({
   onToggleWeightUnit,
 }: {
   theme: ReturnType<typeof useTheme>["theme"];
+  name: string;
+  setName: (v: string) => void;
   sex: Sex;
   setSex: (s: Sex) => void;
   ageText: string;
@@ -360,6 +367,17 @@ function OnbStats({
       <Text style={[styles.pCopy, { color: theme.muted, fontFamily: bodyFont(500) }]}>
         We'll calculate your personalized targets — everything stays private on your device.
       </Text>
+      <View style={[styles.nameField, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+        <Text style={[styles.statFieldLabel, { color: theme.muted, fontFamily: bodyFont(600) }]}>Your name</Text>
+        <TextInput
+          value={name}
+          onChangeText={setName}
+          placeholder="What should we call you?"
+          placeholderTextColor={theme.muted}
+          autoCapitalize="words"
+          style={[styles.nameFieldInput, { color: theme.ink, fontFamily: FONT_DISPLAY }]}
+        />
+      </View>
       <View style={styles.sexRow}>
         {(
           [
@@ -620,6 +638,8 @@ const styles = StyleSheet.create({
   h2: { fontSize: 27, fontWeight: "700", letterSpacing: -0.5, marginBottom: 8, lineHeight: 31 },
   pCopy: { fontSize: 14.5, fontWeight: "500", marginBottom: 22, lineHeight: 21 },
   errorText: { fontSize: 14, fontWeight: "600", textAlign: "center", marginTop: 40, lineHeight: 20 },
+  nameField: { borderRadius: 16, padding: 13, borderWidth: 1, marginBottom: 12 },
+  nameFieldInput: { fontSize: 18, fontWeight: "700", padding: 0, marginTop: 4 },
   sexRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
   sexBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, alignItems: "center" },
   sexBtnText: { fontSize: 14, fontWeight: "700" },

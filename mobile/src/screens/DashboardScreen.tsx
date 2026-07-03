@@ -2,7 +2,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { LinearGradient } from "expo-linear-gradient";
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import Icon from "../components/Icon";
 import Confetti from "../components/Confetti";
@@ -12,21 +12,38 @@ import { FONT_DISPLAY, bodyFont } from "../theme/typography";
 import { MACRO_COLORS } from "../theme/themes";
 import { useProgress, fmt } from "../hooks/useProgress";
 import { useMealLog, type LoggedMeal } from "../context/MealLogContext";
+import { getProfile } from "../api/profileApi";
+import { getHistory } from "../api/historyApi";
 import Ring from "../components/Ring";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
 const RING_SIZE = 218;
+
+function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 export default function DashboardScreen() {
   const { theme } = useTheme();
   const { meals, targets, celebrate, saved, refreshMeals, refreshTargets } = useMealLog();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const p = useProgress(true, 1150);
+  const [displayName, setDisplayName] = useState("");
+  const [streak, setStreak] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       refreshMeals().catch(() => {});
       refreshTargets().catch(() => {});
+      getProfile()
+        .then((profile) => setDisplayName(profile.display_name))
+        .catch(() => {});
+      getHistory(1)
+        .then((h) => setStreak(h.streak.current_streak))
+        .catch(() => {});
     }, []),
   );
 
@@ -48,13 +65,13 @@ export default function DashboardScreen() {
       <View style={styles.greetingRow}>
         <View>
           <Text style={[styles.greeting, { color: theme.muted, fontFamily: bodyFont(600) }]}>
-            Good afternoon, Maya
+            {timeOfDayGreeting()}{displayName ? `, ${displayName}` : ""}
           </Text>
           <Text style={[styles.today, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Today</Text>
         </View>
         <View style={[styles.streakPill, { backgroundColor: theme.surface, borderColor: theme.line }]}>
           <Icon name="flame" size={17} color={theme.accent} fill={theme.accent} />
-          <Text style={[styles.streakNum, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>12</Text>
+          <Text style={[styles.streakNum, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>{streak}</Text>
           <Text style={[styles.streakLabel, { color: theme.muted, fontFamily: bodyFont(600) }]}>days</Text>
         </View>
       </View>
