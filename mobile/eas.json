@@ -14,13 +14,13 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://macrolens-backend-xg3k.onrender.com"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://macrolens-backend-xg3k.onrender.com"
       }
     }
   },

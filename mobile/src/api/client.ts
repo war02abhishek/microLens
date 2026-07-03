@@ -12,7 +12,7 @@ function resolveBaseURL(): string {
   if (__DEV__) {
     return Platform.OS === "android" ? "http://10.0.2.2:8080" : "http://localhost:8080";
   }
-  return "https://your-backend.onrender.com";
+  return "https://macrolens-backend-xg3k.onrender.com";
 }
 
 const BASE_URL = resolveBaseURL();
