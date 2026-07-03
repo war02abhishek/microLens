@@ -7,9 +7,11 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.abhishekram.macrolens"
     },
     "android": {
+      "package": "com.abhishekram.macrolens",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -23,7 +25,14 @@
     },
     "plugins": [
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "MacroLens uses your camera to identify foods and estimate macros from a photo of your meal.",
+          "photosPermission": "MacroLens uses your photo library so you can log a meal from an existing picture."
+        }
+      ]
     ]
   }
 }
