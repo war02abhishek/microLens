@@ -80,7 +80,11 @@ const systemPrompt = "You identify foods and estimate portion sizes and macros f
 	"macro profiles for each food the way a careful nutrition-conscious cook would. Also express " +
 	"quantity_value as an estimated weight in grams with quantity_unit set to \"g\" so portions are " +
 	"comparable across items, converting everyday units yourself (e.g. \"2 boiled eggs\" is about 100g). " +
-	"Be conservative with confidence when the food, portion size, or macro estimate is ambiguous."
+	"Be conservative with confidence when the food, portion size, or macro estimate is ambiguous. " +
+	"If the photo or description does not actually show or describe real, identifiable food — for example " +
+	"it's blank, a test pattern, a non-food object or scene, too blurry/dark to make out, or the text is " +
+	"unrelated to eating — return an empty items array instead of guessing. Never invent food items that " +
+	"aren't actually shown or described."
 
 // IdentifyFromText parses a free-text meal description (e.g. "two eggs and a
 // slice of toast") into structured food items.

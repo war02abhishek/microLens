@@ -83,6 +83,15 @@ export default function AIResultScreen() {
     request
       .then((draft) => {
         if (cancelled) return;
+        if (draft.items.length === 0) {
+          setError(
+            mode === "photo"
+              ? "Couldn't identify any food in that photo. Try a clearer shot, centered on the plate."
+              : "Couldn't identify any food in that description. Try describing what you ate.",
+          );
+          setPhase("error");
+          return;
+        }
         setItems(draft.items.map(draftToItem));
         setMealName(draft.items[0]?.food_name ?? "Logged meal");
         setPhase("result");
