@@ -1,7 +1,8 @@
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import Icon from "../components/Icon";
 import { useTheme } from "../theme/ThemeContext";
@@ -12,17 +13,57 @@ const SUGGESTIONS = ["2 eggs & toast", "Chicken breast 200g + rice", "Protein sh
 
 type Mode = "photo" | "text";
 
-// PRD §3.1 / §4.4-3. Camera capture is a placeholder tile (no camera
-// integration yet) — wire expo-camera once native permissions/build are
-// set up. Text mode is fully functional against POST /meals/analyze/text.
+// PRD §3.1 / §4.4-3. Photo mode launches the OS camera/gallery picker
+// (expo-image-picker) rather than a custom in-app viewfinder — a
+// pragmatic stand-in for the design's live preview that still captures a
+// real photo end-to-end. Text mode hits POST /meals/analyze/text.
 export default function CaptureScreen() {
   const { theme } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [mode, setMode] = useState<Mode>("photo");
   const [text, setText] = useState("");
+  const [capturing, setCapturing] = useState(false);
 
-  const analyze = (m: Mode) => {
-    navigation.navigate("AIResult", { mode: m, description: m === "text" ? text : undefined });
+  const goToResult = (imageBase64: string) => {
+    navigation.navigate("AIResult", { mode: "photo", imageBase64: `data:image/jpeg;base64,${imageBase64}` });
+  };
+
+  const takePhoto = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Camera permission needed", "Enable camera access in Settings to log a meal by photo.");
+      return;
+    }
+    setCapturing(true);
+    try {
+      const result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.6, allowsEditing: false });
+      if (!result.canceled && result.assets[0]?.base64) {
+        goToResult(result.assets[0].base64);
+      }
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  const pickFromGallery = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Photos permission needed", "Enable photo library access in Settings to pick a meal photo.");
+      return;
+    }
+    setCapturing(true);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.6, mediaTypes: ["images"] });
+      if (!result.canceled && result.assets[0]?.base64) {
+        goToResult(result.assets[0].base64);
+      }
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  const analyzeText = () => {
+    navigation.navigate("AIResult", { mode: "text", description: text });
   };
 
   return (
@@ -76,15 +117,21 @@ export default function CaptureScreen() {
 
         {mode === "photo" ? (
           <View style={styles.photoRow}>
-            <View style={[styles.sideBtn, { backgroundColor: theme.surface2 }]}>
+            <Pressable
+              testID="gallery-btn"
+              style={[styles.sideBtn, { backgroundColor: theme.surface2 }]}
+              onPress={pickFromGallery}
+              disabled={capturing}
+            >
               <Icon name="gallery" size={22} color={theme.muted} />
-            </View>
+            </Pressable>
             <Pressable
               testID="shutter-btn"
               style={[styles.shutter, { backgroundColor: theme.accent, borderColor: theme.surface, shadowColor: theme.accent }]}
-              onPress={() => analyze("photo")}
+              onPress={takePhoto}
+              disabled={capturing}
             >
-              <Icon name="camera" size={30} color="#fff" />
+              {capturing ? <ActivityIndicator color="#fff" /> : <Icon name="camera" size={30} color="#fff" />}
             </Pressable>
             <View style={[styles.sideBtn, { backgroundColor: theme.surface2 }]}>
               <Icon name="mic" size={22} color={theme.muted} />
@@ -106,7 +153,7 @@ export default function CaptureScreen() {
               <Pressable
                 testID="send-btn"
                 style={[styles.sendBtn, { backgroundColor: theme.accent }]}
-                onPress={() => analyze("text")}
+                onPress={analyzeText}
                 disabled={!text.trim()}
               >
                 <Icon name="sparkle" size={22} color="#fff" fill="#fff" />

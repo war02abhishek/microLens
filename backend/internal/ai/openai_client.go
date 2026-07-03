@@ -26,13 +26,20 @@ func NewClient(apiKey string) *Client {
 	}
 }
 
-// IdentifiedItem is one food item extracted from a photo or text description,
-// before macro lookup. Quantity is the model's best estimate; Confidence
+// IdentifiedItem is one food item extracted from a photo or text
+// description, with macros estimated directly by the model (no nutrition
+// database lookup — see internal/nutrition for the alternate path, kept
+// but currently unused). Quantity and macros are the model's best
+// estimate for the whole item as described (not per-100g); Confidence
 // drives the "AI is unsure" UI treatment from PRD §3.1.
 type IdentifiedItem struct {
 	FoodName      string  `json:"food_name"`
 	QuantityValue float64 `json:"quantity_value"`
 	QuantityUnit  string  `json:"quantity_unit"`
+	Calories      float64 `json:"calories"`
+	ProteinG      float64 `json:"protein_g"`
+	CarbsG        float64 `json:"carbs_g"`
+	FatG          float64 `json:"fat_g"`
 	Confidence    float64 `json:"confidence"`
 }
 
@@ -52,9 +59,13 @@ var mealItemsSchema = map[string]any{
 					"food_name":      map[string]any{"type": "string"},
 					"quantity_value": map[string]any{"type": "number"},
 					"quantity_unit":  map[string]any{"type": "string", "description": "e.g. g, ml, piece, slice"},
-					"confidence":     map[string]any{"type": "number", "description": "0-1, how sure the model is about this item and its quantity"},
+					"calories":       map[string]any{"type": "number", "description": "estimated total calories for this item at the estimated quantity (not per 100g)"},
+					"protein_g":      map[string]any{"type": "number", "description": "estimated total grams of protein for this item at the estimated quantity"},
+					"carbs_g":        map[string]any{"type": "number", "description": "estimated total grams of carbohydrate for this item at the estimated quantity"},
+					"fat_g":          map[string]any{"type": "number", "description": "estimated total grams of fat for this item at the estimated quantity"},
+					"confidence":     map[string]any{"type": "number", "description": "0-1, how sure the model is about this item, its quantity, and its macros"},
 				},
-				"required":             []string{"food_name", "quantity_value", "quantity_unit", "confidence"},
+				"required":             []string{"food_name", "quantity_value", "quantity_unit", "calories", "protein_g", "carbs_g", "fat_g", "confidence"},
 				"additionalProperties": false,
 			},
 		},
@@ -63,13 +74,13 @@ var mealItemsSchema = map[string]any{
 	"additionalProperties": false,
 }
 
-const systemPrompt = "You identify foods and estimate portion sizes from a meal photo or description. " +
-	"Return every distinct food item with your best-guess quantity and a confidence score. " +
-	"Always express quantity_value as an estimated weight in grams, with quantity_unit set to \"g\" " +
-	"— convert everyday units yourself (e.g. \"2 boiled eggs\" is about 100g, \"a slice of toast\" is " +
-	"about 30g, \"a tablespoon of butter\" is about 14g). This is required even when the input already " +
-	"gives a count or volume, because downstream nutrition lookups scale strictly from grams. " +
-	"Be conservative with confidence when the portion size or ingredient is ambiguous."
+const systemPrompt = "You identify foods and estimate portion sizes and macros from a meal photo or description. " +
+	"Return every distinct food item with your best-guess quantity and calories/protein/carbs/fat for " +
+	"that specific quantity (not per 100g) — use your own nutrition knowledge, reasoning about typical " +
+	"macro profiles for each food the way a careful nutrition-conscious cook would. Also express " +
+	"quantity_value as an estimated weight in grams with quantity_unit set to \"g\" so portions are " +
+	"comparable across items, converting everyday units yourself (e.g. \"2 boiled eggs\" is about 100g). " +
+	"Be conservative with confidence when the food, portion size, or macro estimate is ambiguous."
 
 // IdentifyFromText parses a free-text meal description (e.g. "two eggs and a
 // slice of toast") into structured food items.

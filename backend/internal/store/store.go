@@ -321,3 +321,53 @@ func (s *Store) UpdateStreakOnLog(ctx context.Context, userID string, loggedAt t
 	)
 	return err
 }
+
+// --- History ---
+
+// GetDailyTotals returns the last `days` days (oldest first, ending today)
+// of aggregated macro totals for the History screen's charts/grid. Days
+// with no logged meals come back zero-filled rather than omitted, so the
+// caller always gets a contiguous date range to plot.
+func (s *Store) GetDailyTotals(ctx context.Context, userID string, days int) ([]model.DayTotal, error) {
+	now := time.Now()
+	startDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -(days - 1))
+
+	rows, err := s.db.Query(ctx, `
+		select date_trunc('day', m.logged_at) as day,
+		       coalesce(sum(mi.calories), 0), coalesce(sum(mi.protein_g), 0),
+		       coalesce(sum(mi.carbs_g), 0), coalesce(sum(mi.fat_g), 0),
+		       count(distinct m.id)
+		from meals m
+		join meal_items mi on mi.meal_id = m.id
+		where m.user_id = $1 and m.logged_at >= $2
+		group by day`, userID, startDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byDate := make(map[string]model.DayTotal)
+	for rows.Next() {
+		var day time.Time
+		var dt model.DayTotal
+		if err := rows.Scan(&day, &dt.Calories, &dt.ProteinG, &dt.CarbsG, &dt.FatG, &dt.MealsLogged); err != nil {
+			return nil, err
+		}
+		dt.Date = day.Format("2006-01-02")
+		byDate[dt.Date] = dt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	totals := make([]model.DayTotal, days)
+	for i := 0; i < days; i++ {
+		date := startDay.AddDate(0, 0, i).Format("2006-01-02")
+		if dt, ok := byDate[date]; ok {
+			totals[i] = dt
+		} else {
+			totals[i] = model.DayTotal{Date: date}
+		}
+	}
+	return totals, nil
+}

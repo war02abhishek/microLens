@@ -59,44 +59,48 @@ func (h *MealHandler) AnalyzeText(c *gin.Context) {
 		return
 	}
 
-	draft := mealDraft{Source: "text", RawInput: req.Description, Items: h.resolveMacros(c, identified)}
+	draft := mealDraft{Source: "text", RawInput: req.Description, Items: identifiedToDraft(identified)}
 	c.JSON(http.StatusOK, draft)
 }
 
-// POST /meals/analyze/photo — not yet wired to a real camera capture flow
-// on the client; the AI client (internal/ai) and this endpoint are ready
-// for it once expo-camera is integrated.
+// POST /meals/analyze/photo — body: {"image_base64": "data:image/jpeg;base64,..."}
 func (h *MealHandler) AnalyzePhoto(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "photo capture not yet wired — use /meals/analyze/text"})
+	var req struct {
+		ImageBase64 string `json:"image_base64" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	identified, err := h.ai.IdentifyFromPhoto(c.Request.Context(), req.ImageBase64)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "AI meal recognition failed: " + err.Error()})
+		return
+	}
+
+	draft := mealDraft{Source: "photo", Items: identifiedToDraft(identified)}
+	c.JSON(http.StatusOK, draft)
 }
 
-// resolveMacros looks up per-100g macros for each identified item and
-// scales them to the estimated quantity. A lookup miss doesn't fail the
-// whole request — that item is returned with zeroed macros and low
-// confidence so the user can still see and correct it (PRD §3.1: AI
-// results are always an editable, reviewable draft).
-func (h *MealHandler) resolveMacros(c *gin.Context, identified []ai.IdentifiedItem) []mealItemDraft {
+// identifiedToDraft maps the AI's directly-estimated macros straight
+// through. The nutrition-DB lookup path (internal/nutrition) is kept but
+// unused for now — the USDA free-text search was mismatching foods (see
+// git history), and macro accuracy is being trusted to the model itself
+// for the time being.
+func identifiedToDraft(identified []ai.IdentifiedItem) []mealItemDraft {
 	items := make([]mealItemDraft, 0, len(identified))
 	for _, it := range identified {
-		draft := mealItemDraft{
+		items = append(items, mealItemDraft{
 			FoodName:      it.FoodName,
 			QuantityValue: it.QuantityValue,
 			QuantityUnit:  it.QuantityUnit,
+			Calories:      it.Calories,
+			ProteinG:      it.ProteinG,
+			CarbsG:        it.CarbsG,
+			FatG:          it.FatG,
 			Confidence:    it.Confidence,
-		}
-
-		macros, err := h.nutrition.Lookup(c.Request.Context(), it.FoodName)
-		if err == nil && it.QuantityUnit == "g" {
-			scale := it.QuantityValue / 100
-			draft.Calories = macros.Calories * scale
-			draft.ProteinG = macros.ProteinG * scale
-			draft.CarbsG = macros.CarbsG * scale
-			draft.FatG = macros.FatG * scale
-		} else {
-			draft.Confidence = 0.2 // surface as low-confidence when we couldn't verify macros
-		}
-
-		items = append(items, draft)
+		})
 	}
 	return items
 }

@@ -106,3 +106,15 @@ type Streak struct {
 	LongestStreak  int        `json:"longest_streak"`
 	LastLoggedDate *time.Time `json:"last_logged_date,omitempty"`
 }
+
+// DayTotal is one day's aggregated macro totals for the history/trends
+// screen. Date is YYYY-MM-DD; days with no meals logged still appear with
+// zeroed totals so charts render a continuous range.
+type DayTotal struct {
+	Date        string  `json:"date"`
+	Calories    float64 `json:"calories"`
+	ProteinG    float64 `json:"protein_g"`
+	CarbsG      float64 `json:"carbs_g"`
+	FatG        float64 `json:"fat_g"`
+	MealsLogged int     `json:"meals_logged"`
+}

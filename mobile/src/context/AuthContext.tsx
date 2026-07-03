@@ -1,14 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { getAuthToken, setAuthToken } from "../api/client";
+import { getAuthToken, setTokens } from "../api/client";
 import { signup } from "../api/authApi";
 
 const DEVICE_ID_KEY = "macrolens.deviceId";
 
 type AuthContextValue = {
   isAuthenticated: boolean;
-  signIn: (token: string) => Promise<void>;
+  signIn: (accessToken: string, refreshToken?: string) => Promise<void>;
   signOut: () => Promise<void>;
   // Every downloaded instance is a private, independent account (PRD
   // §2.1) — there's no signup/login UI yet, so on first launch we
@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const password = deviceId; // random + device-local; never shown or reused as a real credential
 
       const auth = await signup(email, password);
-      await setAuthToken(auth.access_token);
+      await setTokens(auth.access_token, auth.refresh_token);
       setIsAuthenticated(true);
     })();
 
@@ -63,12 +63,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       isAuthenticated,
-      signIn: async (token: string) => {
-        await setAuthToken(token);
+      signIn: async (accessToken: string, refreshToken?: string) => {
+        await setTokens(accessToken, refreshToken ?? null);
         setIsAuthenticated(true);
       },
       signOut: async () => {
-        await setAuthToken(null);
+        await setTokens(null, null);
         setIsAuthenticated(false);
       },
       ensureDeviceAccount,

@@ -39,6 +39,7 @@ func main() {
 	goalHandler := handler.NewGoalHandler(db)
 	mealHandler := handler.NewMealHandler(aiClient, nutritionClient, db)
 	themeHandler := handler.NewThemeHandler(db)
+	historyHandler := handler.NewHistoryHandler(db)
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -69,6 +70,8 @@ func main() {
 		api.DELETE("/meals/:id", mealHandler.Delete)
 
 		api.GET("/themes", themeHandler.List)
+
+		api.GET("/history", historyHandler.Get)
 	}
 
 	log.Printf("macrolens-backend listening on :%s", cfg.Port)

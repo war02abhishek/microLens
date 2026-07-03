@@ -10,7 +10,7 @@ export type RootStackParamList = {
   Tabs: undefined;
   Onboarding: undefined;
   Capture: undefined;
-  AIResult: { mode: "photo" | "text"; description?: string } | undefined;
+  AIResult: { mode: "photo" | "text"; description?: string; imageBase64?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

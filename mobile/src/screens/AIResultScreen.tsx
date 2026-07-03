@@ -9,7 +9,7 @@ import { bodyFont, FONT_DISPLAY } from "../theme/typography";
 import { CONFIDENCE, MACRO_COLORS, type ConfidenceLevel } from "../theme/themes";
 import { fmt } from "../hooks/useProgress";
 import { useMealLog } from "../context/MealLogContext";
-import { analyzeText, createMeal, type MealItemDraft } from "../api/mealApi";
+import { analyzePhoto, analyzeText, createMeal, type MealItemDraft } from "../api/mealApi";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
 type Item = {
@@ -56,23 +56,31 @@ export default function AIResultScreen() {
   const [error, setError] = useState<string | null>(null);
   const [savingError, setSavingError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [source, setSource] = useState<"photo" | "text">("text");
 
   useEffect(() => {
-    const { mode, description } = route.params ?? { mode: "text" as const };
+    const { mode, description, imageBase64 } = route.params ?? { mode: "text" as const };
+    setSource(mode);
 
+    let request: Promise<{ items: MealItemDraft[] }>;
     if (mode === "photo") {
-      setError("Photo capture isn't wired up yet — go back and use Describe instead.");
-      setPhase("error");
-      return;
-    }
-    if (!description || !description.trim()) {
-      setError("Type a description first.");
-      setPhase("error");
-      return;
+      if (!imageBase64) {
+        setError("No photo was captured. Go back and try again.");
+        setPhase("error");
+        return;
+      }
+      request = analyzePhoto(imageBase64);
+    } else {
+      if (!description || !description.trim()) {
+        setError("Type a description first.");
+        setPhase("error");
+        return;
+      }
+      request = analyzeText(description);
     }
 
     let cancelled = false;
-    analyzeText(description)
+    request
       .then((draft) => {
         if (cancelled) return;
         setItems(draft.items.map(draftToItem));
@@ -112,7 +120,7 @@ export default function AIResultScreen() {
         fat_g: it.f,
         confidence: it.conf === "high" ? 0.9 : it.conf === "med" ? 0.5 : 0.2,
       }));
-      await createMeal({ source: "text", items: draftItems });
+      await createMeal({ source, items: draftItems });
       addMeal(mealName, totals);
       // Capture + AIResult are both pushed on the root stack above Tabs —
       // popToTop dismisses both and lands back on the dashboard.

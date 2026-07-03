@@ -41,8 +41,8 @@ export type Meal = {
   items: MealItem[];
 };
 
-// Runs the real backend pipeline: OpenAI vision/text identification +
-// nutrition-DB macro lookup (backend/internal/ai + internal/nutrition).
+// Runs the real backend pipeline: OpenAI identifies foods/portions and
+// estimates macros directly (backend/internal/ai).
 export function analyzeText(description: string) {
   return apiRequest<MealDraft>("/meals/analyze/text", {
     method: "POST",
@@ -50,10 +50,12 @@ export function analyzeText(description: string) {
   });
 }
 
-// Photo analysis needs a real camera capture flow (expo-camera) on the
-// client first — the backend endpoint exists but returns 501 until then.
-export function analyzePhoto(_photoUri: string): Promise<MealDraft> {
-  throw new Error("not implemented — camera capture isn't wired yet, use analyzeText");
+// imageBase64 must be a full data URL (e.g. "data:image/jpeg;base64,...").
+export function analyzePhoto(imageBase64: string) {
+  return apiRequest<MealDraft>("/meals/analyze/photo", {
+    method: "POST",
+    body: { image_base64: imageBase64 },
+  });
 }
 
 export function createMeal(meal: MealDraft) {

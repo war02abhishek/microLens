@@ -1,28 +1,84 @@
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useState } from "react";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Line, Path } from "react-native-svg";
 
 import Icon from "../components/Icon";
 import { useTheme } from "../theme/ThemeContext";
 import { bodyFont, FONT_DISPLAY } from "../theme/typography";
 import { MACRO_COLORS } from "../theme/themes";
-import { useProgress } from "../hooks/useProgress";
+import { useProgress, fmt } from "../hooks/useProgress";
+import { useMealLog } from "../context/MealLogContext";
+import { getHistory, type DayTotal, type Streak } from "../api/historyApi";
 
-// TODO: replace with GET /meals aggregated by day once history endpoints
-// exist on the backend — these mirror the design handoff's sample data.
-const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
-const CALORIES = [1980, 2240, 2110, 1870, 2300, 1620, 1180];
-const PROTEIN = [150, 172, 158, 140, 168, 120, 92];
-const MAX_CAL = 2600;
-const LOGGED_WEEKS = [
-  [3, 2, 3, 3, 2, 1, 3],
-  [3, 3, 3, 2, 3, 3, 2],
-  [2, 3, 3, 3, 3, 2, 3],
-  [3, 3, 2, 3, 0, 0, 0],
-];
+const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function weekdayLetter(dateStr: string): string {
+  return WEEKDAY_LETTERS[new Date(`${dateStr}T00:00:00`).getDay()];
+}
+
+function chunkIntoWeeks(days: DayTotal[]): DayTotal[][] {
+  const weeks: DayTotal[][] = [];
+  for (let i = 0; i < days.length; i += 7) {
+    weeks.push(days.slice(i, i + 7));
+  }
+  return weeks;
+}
 
 export default function HistoryScreen() {
   const { theme } = useTheme();
+  const { targets } = useMealLog();
   const p = useProgress(true, 900);
+  const [days, setDays] = useState<DayTotal[] | null>(null);
+  const [streak, setStreak] = useState<Streak | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      getHistory(28)
+        .then((h) => {
+          if (cancelled) return;
+          setDays(h.days);
+          setStreak(h.streak);
+          setError(null);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setError(e instanceof Error ? e.message : "Failed to load history");
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
+
+  if (error) {
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.bg }]}>
+        <Icon name="x" size={28} color="#ff5a5f" />
+        <Text style={[styles.errorText, { color: theme.muted, fontFamily: bodyFont(500) }]}>{error}</Text>
+      </View>
+    );
+  }
+
+  if (!days || !streak) {
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.bg }]}>
+        <ActivityIndicator color={theme.accent} />
+      </View>
+    );
+  }
+
+  const week = days.slice(-7);
+  const calories = week.map((d) => d.calories);
+  const protein = week.map((d) => d.protein_g);
+  const dayLabels = week.map((d) => weekdayLetter(d.date));
+  const maxCal = Math.max(targets.cal * 1.3, ...calories, 1);
+  const avgCal = Math.round(calories.reduce((a, b) => a + b, 0) / calories.length);
+  const maxProtein = Math.max(targets.protein * 1.25, ...protein, 1);
+  const weeks = chunkIntoWeeks(days);
+  const recentLoggedDays = days.slice(-5).filter((d) => d.meals_logged > 0).length;
 
   return (
     <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -37,12 +93,19 @@ export default function HistoryScreen() {
           <Icon name="flame" size={24} color="#fff" fill="#fff" />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.streakTitle, { fontFamily: FONT_DISPLAY }]}>12-day streak</Text>
-          <Text style={[styles.streakSub, { fontFamily: bodyFont(600) }]}>Best yet — 3 days to your record</Text>
+          <Text style={[styles.streakTitle, { fontFamily: FONT_DISPLAY }]}>{streak.current_streak}-day streak</Text>
+          <Text style={[styles.streakSub, { fontFamily: bodyFont(600) }]}>
+            {streak.current_streak >= streak.longest_streak && streak.current_streak > 0
+              ? "New record!"
+              : `Best yet — ${Math.max(0, streak.longest_streak - streak.current_streak)} days to your record`}
+          </Text>
         </View>
         <View style={styles.streakBars}>
-          {[1, 1, 1, 1, 0].map((on, i) => (
-            <View key={i} style={[styles.streakBar, { height: 20 + i * 4, backgroundColor: on ? "#fff" : "rgba(255,255,255,0.35)" }]} />
+          {[0, 1, 2, 3, 4].map((i) => (
+            <View
+              key={i}
+              style={[styles.streakBar, { height: 20 + i * 4, backgroundColor: i < recentLoggedDays ? "#fff" : "rgba(255,255,255,0.35)" }]}
+            />
           ))}
         </View>
       </View>
@@ -51,11 +114,11 @@ export default function HistoryScreen() {
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.line }]}>
         <View style={styles.cardHeaderRow}>
           <Text style={[styles.cardTitle, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Calories · this week</Text>
-          <Text style={[styles.cardMeta, { color: theme.muted, fontFamily: bodyFont(600) }]}>avg 1,900</Text>
+          <Text style={[styles.cardMeta, { color: theme.muted, fontFamily: bodyFont(600) }]}>avg {fmt(avgCal)}</Text>
         </View>
         <View style={styles.barsRow}>
-          {CALORIES.map((v, i) => {
-            const isToday = i === 6;
+          {calories.map((v, i) => {
+            const isToday = i === calories.length - 1;
             return (
               <View key={i} style={styles.barCol}>
                 <View style={styles.barTrack}>
@@ -63,17 +126,17 @@ export default function HistoryScreen() {
                     style={[
                       styles.bar,
                       {
-                        height: `${p * (v / MAX_CAL) * 100}%`,
+                        height: `${p * (v / maxCal) * 100}%`,
                         backgroundColor: isToday ? theme.accent : theme.surface2,
                       },
                     ]}
                   >
                     {isToday && (
-                      <Text style={[styles.barValue, { color: theme.accent, fontFamily: FONT_DISPLAY }]}>{v}</Text>
+                      <Text style={[styles.barValue, { color: theme.accent, fontFamily: FONT_DISPLAY }]}>{Math.round(v)}</Text>
                     )}
                   </View>
                 </View>
-                <Text style={[styles.barDay, { color: theme.muted, fontFamily: bodyFont(600) }]}>{DAYS[i]}</Text>
+                <Text style={[styles.barDay, { color: theme.muted, fontFamily: bodyFont(600) }]}>{dayLabels[i]}</Text>
               </View>
             );
           })}
@@ -84,26 +147,28 @@ export default function HistoryScreen() {
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.line }]}>
         <View style={styles.cardHeaderRow}>
           <Text style={[styles.cardTitle, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Protein trend</Text>
-          <Text style={[styles.cardMeta, { color: MACRO_COLORS.protein, fontFamily: bodyFont(700) }]}>▲ on target</Text>
         </View>
-        <Sparkline vals={PROTEIN} color={MACRO_COLORS.protein} track={theme.muted} p={p} target={165} max={200} surface={theme.surface} />
+        <Sparkline vals={protein} color={MACRO_COLORS.protein} track={theme.muted} p={p} target={targets.protein} max={maxProtein} surface={theme.surface} />
       </View>
 
       {/* logged days grid */}
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.line }]}>
         <Text style={[styles.cardTitle, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Logged days</Text>
         <View style={{ gap: 6, marginTop: 14 }}>
-          {LOGGED_WEEKS.map((week, wi) => (
+          {weeks.map((wk, wi) => (
             <View key={wi} style={{ flexDirection: "row", gap: 6 }}>
-              {week.map((lvl, di) => (
-                <View
-                  key={di}
-                  style={[
-                    styles.dayCell,
-                    { backgroundColor: lvl === 0 ? theme.surface2 : theme.accent, opacity: lvl === 0 ? 0.5 : 0.35 + lvl * 0.22 },
-                  ]}
-                />
-              ))}
+              {wk.map((d, di) => {
+                const lvl = Math.min(3, d.meals_logged);
+                return (
+                  <View
+                    key={di}
+                    style={[
+                      styles.dayCell,
+                      { backgroundColor: lvl === 0 ? theme.surface2 : theme.accent, opacity: lvl === 0 ? 0.5 : 0.35 + lvl * 0.22 },
+                    ]}
+                  />
+                );
+              })}
             </View>
           ))}
         </View>
@@ -153,6 +218,8 @@ function Sparkline({
 
 const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 120 },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 32 },
+  errorText: { fontSize: 14, textAlign: "center" },
   header: { marginBottom: 18 },
   eyebrow: { fontSize: 14, fontWeight: "600" },
   title: { fontSize: 26, fontWeight: "700", letterSpacing: -0.5 },
