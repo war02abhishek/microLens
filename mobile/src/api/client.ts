@@ -99,6 +99,32 @@ async function doFetch(path: string, options: RequestOptions, token: string | nu
   });
 }
 
+// Native fetch failures (DNS resolution, no connectivity, timeouts) surface
+// as raw platform exception text (e.g. Android's UnknownHostException
+// message) — useless to a real user. Screens should show this instead of
+// the raw Error.message wherever they display a failed request to the user.
+export function friendlyError(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("unable to resolve host") ||
+    lower.includes("no address associated") ||
+    lower.includes("network request failed")
+  ) {
+    return "No internet connection. Check your network and try again.";
+  }
+  if (lower.includes("timed out") || lower.includes("timeout")) {
+    return "The request timed out. Try again in a moment.";
+  }
+  if (lower.startsWith("api error 5")) {
+    return "The server is temporarily unavailable — it may be waking up (first request can take ~30s). Try again in a moment.";
+  }
+  if (lower.startsWith("api error 401") || lower.startsWith("api error 403")) {
+    return "Your session expired. Try again.";
+  }
+  return raw;
+}
+
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = await getAuthToken();
   let response = await doFetch(path, options, token);

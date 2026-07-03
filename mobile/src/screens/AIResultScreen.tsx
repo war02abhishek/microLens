@@ -1,7 +1,18 @@
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import Icon from "../components/Icon";
 import { useTheme } from "../theme/ThemeContext";
@@ -10,12 +21,14 @@ import { CONFIDENCE, MACRO_COLORS, type ConfidenceLevel } from "../theme/themes"
 import { fmt } from "../hooks/useProgress";
 import { useMealLog } from "../context/MealLogContext";
 import { analyzePhoto, analyzeText, createMeal, type MealItemDraft } from "../api/mealApi";
+import { friendlyError } from "../api/client";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
 type Item = {
   id: string;
   name: string;
-  qty: string;
+  qtyValue: number;
+  qtyUnit: string;
   cal: number;
   p: number;
   c: number;
@@ -33,7 +46,8 @@ function draftToItem(d: MealItemDraft, i: number): Item {
   return {
     id: String(i),
     name: d.food_name,
-    qty: `${d.quantity_value} ${d.quantity_unit}`,
+    qtyValue: d.quantity_value,
+    qtyUnit: d.quantity_unit,
     cal: Math.round(d.calories),
     p: Math.round(d.protein_g),
     c: Math.round(d.carbs_g),
@@ -57,6 +71,7 @@ export default function AIResultScreen() {
   const [savingError, setSavingError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [source, setSource] = useState<"photo" | "text">("text");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     const { mode, description, imageBase64 } = route.params ?? { mode: "text" as const };
@@ -98,7 +113,7 @@ export default function AIResultScreen() {
       })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "AI request failed");
+        setError(friendlyError(e));
         setPhase("error");
       });
     return () => {
@@ -111,8 +126,29 @@ export default function AIResultScreen() {
     { cal: 0, p: 0, c: 0, f: 0 },
   );
 
-  const bump = (id: string, delta: number) => {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, cal: Math.max(0, it.cal + delta) } : it)));
+  // Scales the whole item (quantity + every macro) by a factor, instead of
+  // nudging calories alone — a ±10% portion-size adjustment that keeps
+  // protein/carbs/fat/quantity consistent with the calorie count shown.
+  const scaleItem = (id: string, factor: number) => {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        const newQty = Math.max(0, Math.round(it.qtyValue * factor));
+        const ratio = it.qtyValue > 0 ? newQty / it.qtyValue : 1;
+        return {
+          ...it,
+          qtyValue: newQty,
+          cal: Math.round(it.cal * ratio),
+          p: Math.round(it.p * ratio),
+          c: Math.round(it.c * ratio),
+          f: Math.round(it.f * ratio),
+        };
+      }),
+    );
+  };
+
+  const updateItem = (id: string, patch: Omit<Item, "id" | "conf">) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   };
 
   const onSave = async () => {
@@ -121,8 +157,8 @@ export default function AIResultScreen() {
     try {
       const draftItems: MealItemDraft[] = items.map((it) => ({
         food_name: it.name,
-        quantity_value: parseFloat(it.qty) || 0,
-        quantity_unit: it.qty.split(" ")[1] ?? "g",
+        quantity_value: it.qtyValue,
+        quantity_unit: it.qtyUnit,
         calories: it.cal,
         protein_g: it.p,
         carbs_g: it.c,
@@ -135,7 +171,7 @@ export default function AIResultScreen() {
       // popToTop dismisses both and lands back on the dashboard.
       navigation.popToTop();
     } catch (e) {
-      setSavingError(e instanceof Error ? e.message : "Failed to save meal");
+      setSavingError(friendlyError(e));
     } finally {
       setSaving(false);
     }
@@ -217,7 +253,11 @@ export default function AIResultScreen() {
           {items.map((it) => {
             const cf = CONFIDENCE[it.conf];
             return (
-              <View key={it.id} style={[styles.itemCard, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+              <Pressable
+                key={it.id}
+                style={[styles.itemCard, { backgroundColor: theme.surface, borderColor: theme.line }]}
+                onPress={() => setEditingId(it.id)}
+              >
                 <View style={{ flex: 1 }}>
                   <View style={styles.itemNameRow}>
                     <Text style={[styles.itemName, { color: theme.ink, fontFamily: bodyFont(700) }]}>{it.name}</Text>
@@ -228,21 +268,39 @@ export default function AIResultScreen() {
                     )}
                   </View>
                   <Text style={[styles.itemMeta, { color: theme.muted, fontFamily: bodyFont(600) }]}>
-                    {it.qty} · {it.cal} kcal · {it.p}p {it.c}c {it.f}f
+                    {it.qtyValue} {it.qtyUnit} · {it.cal} kcal · {it.p}p {it.c}c {it.f}f
                   </Text>
                 </View>
                 <View style={styles.stepperRow}>
-                  <Pressable style={[styles.stepBtn, { borderColor: theme.line, backgroundColor: theme.surface2 }]} onPress={() => bump(it.id, -10)}>
+                  <Pressable
+                    style={[styles.stepBtn, { borderColor: theme.line, backgroundColor: theme.surface2 }]}
+                    onPress={() => scaleItem(it.id, 0.9)}
+                  >
                     <Text style={[styles.stepBtnText, { color: theme.ink }]}>−</Text>
                   </Pressable>
-                  <Pressable style={[styles.stepBtn, { borderColor: theme.line, backgroundColor: theme.surface2 }]} onPress={() => bump(it.id, 10)}>
+                  <Pressable
+                    style={[styles.stepBtn, { borderColor: theme.line, backgroundColor: theme.surface2 }]}
+                    onPress={() => scaleItem(it.id, 1.1)}
+                  >
                     <Text style={[styles.stepBtnText, { color: theme.ink }]}>+</Text>
                   </Pressable>
                 </View>
-              </View>
+              </Pressable>
             );
           })}
         </View>
+
+        {editingId && (
+          <EditItemModal
+            theme={theme}
+            item={items.find((it) => it.id === editingId)!}
+            onCancel={() => setEditingId(null)}
+            onSave={(patch) => {
+              updateItem(editingId, patch);
+              setEditingId(null);
+            }}
+          />
+        )}
 
         <View style={[styles.confHint, { backgroundColor: `${theme.accent}12` }]}>
           <Icon name="sparkle" size={16} color={theme.accent} />
@@ -274,6 +332,138 @@ export default function AIResultScreen() {
     </View>
   );
 }
+
+function EditItemModal({
+  theme,
+  item,
+  onCancel,
+  onSave,
+}: {
+  theme: ReturnType<typeof useTheme>["theme"];
+  item: Item;
+  onCancel: () => void;
+  onSave: (patch: Omit<Item, "id" | "conf">) => void;
+}) {
+  const [name, setName] = useState(item.name);
+  const [qtyValue, setQtyValue] = useState(String(item.qtyValue));
+  const [qtyUnit, setQtyUnit] = useState(item.qtyUnit);
+  const [cal, setCal] = useState(String(item.cal));
+  const [p, setP] = useState(String(item.p));
+  const [c, setC] = useState(String(item.c));
+  const [f, setF] = useState(String(item.f));
+
+  const save = () => {
+    onSave({
+      name: name.trim() || item.name,
+      qtyValue: parseFloat(qtyValue) || 0,
+      qtyUnit: qtyUnit.trim() || "g",
+      cal: Math.max(0, Math.round(parseFloat(cal) || 0)),
+      p: Math.max(0, Math.round(parseFloat(p) || 0)),
+      c: Math.max(0, Math.round(parseFloat(c) || 0)),
+      f: Math.max(0, Math.round(parseFloat(f) || 0)),
+    });
+  };
+
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={editStyles.backdrop}>
+        <View style={[editStyles.card, { backgroundColor: theme.surface }]}>
+          <Text style={[editStyles.title, { color: theme.ink, fontFamily: FONT_DISPLAY }]}>Edit ingredient</Text>
+
+          <Text style={[editStyles.label, { color: theme.muted, fontFamily: bodyFont(600) }]}>Food name</Text>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            style={[editStyles.input, { color: theme.ink, borderColor: theme.line, backgroundColor: theme.surface2 }]}
+          />
+
+          <View style={editStyles.row}>
+            <View style={{ flex: 2 }}>
+              <Text style={[editStyles.label, { color: theme.muted, fontFamily: bodyFont(600) }]}>Quantity</Text>
+              <TextInput
+                value={qtyValue}
+                onChangeText={setQtyValue}
+                keyboardType="numeric"
+                style={[editStyles.input, { color: theme.ink, borderColor: theme.line, backgroundColor: theme.surface2 }]}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[editStyles.label, { color: theme.muted, fontFamily: bodyFont(600) }]}>Unit</Text>
+              <TextInput
+                value={qtyUnit}
+                onChangeText={setQtyUnit}
+                style={[editStyles.input, { color: theme.ink, borderColor: theme.line, backgroundColor: theme.surface2 }]}
+              />
+            </View>
+          </View>
+
+          <View style={editStyles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={[editStyles.label, { color: theme.muted, fontFamily: bodyFont(600) }]}>Calories</Text>
+              <TextInput
+                value={cal}
+                onChangeText={setCal}
+                keyboardType="numeric"
+                style={[editStyles.input, { color: theme.ink, borderColor: theme.line, backgroundColor: theme.surface2 }]}
+              />
+            </View>
+          </View>
+
+          <View style={editStyles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={[editStyles.label, { color: MACRO_COLORS.protein, fontFamily: bodyFont(600) }]}>Protein g</Text>
+              <TextInput
+                value={p}
+                onChangeText={setP}
+                keyboardType="numeric"
+                style={[editStyles.input, { color: theme.ink, borderColor: theme.line, backgroundColor: theme.surface2 }]}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[editStyles.label, { color: MACRO_COLORS.carbs, fontFamily: bodyFont(600) }]}>Carbs g</Text>
+              <TextInput
+                value={c}
+                onChangeText={setC}
+                keyboardType="numeric"
+                style={[editStyles.input, { color: theme.ink, borderColor: theme.line, backgroundColor: theme.surface2 }]}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[editStyles.label, { color: MACRO_COLORS.fat, fontFamily: bodyFont(600) }]}>Fat g</Text>
+              <TextInput
+                value={f}
+                onChangeText={setF}
+                keyboardType="numeric"
+                style={[editStyles.input, { color: theme.ink, borderColor: theme.line, backgroundColor: theme.surface2 }]}
+              />
+            </View>
+          </View>
+
+          <View style={editStyles.btnRow}>
+            <Pressable style={[editStyles.btn, { backgroundColor: theme.surface2 }]} onPress={onCancel}>
+              <Text style={[editStyles.btnText, { color: theme.ink, fontFamily: bodyFont(700) }]}>Cancel</Text>
+            </Pressable>
+            <Pressable style={[editStyles.btn, { backgroundColor: theme.accent }]} onPress={save}>
+              <Text style={[editStyles.btnText, { color: "#fff", fontFamily: bodyFont(700) }]}>Save</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const editStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: 24 },
+  card: { width: "100%", maxWidth: 400, borderRadius: 24, padding: 20 },
+  title: { fontSize: 18, fontWeight: "700", marginBottom: 14 },
+  label: { fontSize: 12, fontWeight: "600", marginBottom: 5, marginTop: 10 },
+  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  row: { flexDirection: "row", gap: 10 },
+  btnRow: { flexDirection: "row", gap: 10, marginTop: 20 },
+  btn: { flex: 1, alignItems: "center", paddingVertical: 13, borderRadius: 14 },
+  btnText: { fontSize: 14.5, fontWeight: "700" },
+});
 
 function ScanningState({ theme }: { theme: ReturnType<typeof useTheme>["theme"] }) {
   const sweep = useRef(new Animated.Value(0)).current;

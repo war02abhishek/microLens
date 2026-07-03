@@ -1,6 +1,6 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Line, Path } from "react-native-svg";
 
 import Icon from "../components/Icon";
@@ -10,6 +10,7 @@ import { MACRO_COLORS } from "../theme/themes";
 import { useProgress, fmt } from "../hooks/useProgress";
 import { useMealLog } from "../context/MealLogContext";
 import { getHistory, type DayTotal, type Streak } from "../api/historyApi";
+import { friendlyError } from "../api/client";
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -32,6 +33,7 @@ export default function HistoryScreen() {
   const [days, setDays] = useState<DayTotal[] | null>(null);
   const [streak, setStreak] = useState<Streak | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -45,12 +47,12 @@ export default function HistoryScreen() {
         })
         .catch((e) => {
           if (cancelled) return;
-          setError(e instanceof Error ? e.message : "Failed to load history");
+          setError(friendlyError(e));
         });
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [retryTick]),
   );
 
   if (error) {
@@ -58,6 +60,9 @@ export default function HistoryScreen() {
       <View style={[styles.centered, { backgroundColor: theme.bg }]}>
         <Icon name="x" size={28} color="#ff5a5f" />
         <Text style={[styles.errorText, { color: theme.muted, fontFamily: bodyFont(500) }]}>{error}</Text>
+        <Pressable style={[styles.retryBtn, { backgroundColor: theme.accent }]} onPress={() => setRetryTick((t) => t + 1)}>
+          <Text style={[styles.retryBtnText, { fontFamily: bodyFont(700) }]}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
@@ -220,6 +225,8 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 120 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 32 },
   errorText: { fontSize: 14, textAlign: "center" },
+  retryBtn: { marginTop: 4, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 14 },
+  retryBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   header: { marginBottom: 18 },
   eyebrow: { fontSize: 14, fontWeight: "600" },
   title: { fontSize: 26, fontWeight: "700", letterSpacing: -0.5 },

@@ -1,13 +1,14 @@
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useState } from "react";
-import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 
 import Icon, { type IconName } from "../components/Icon";
 import { useTheme } from "../theme/ThemeContext";
 import { bodyFont, FONT_DISPLAY } from "../theme/typography";
 import { useMealLog } from "../context/MealLogContext";
 import { getProfile, type Profile } from "../api/profileApi";
+import { friendlyError } from "../api/client";
 import { formatHeightFtIn, formatWeightLb } from "../utils/units";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 
@@ -29,14 +30,25 @@ export default function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { targets, refreshTargets } = useMealLog();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    refreshTargets().catch(() => {});
+    getProfile()
+      .then((p) => {
+        setProfile(p);
+        setError(null);
+      })
+      .catch((e) => setError(friendlyError(e)))
+      .finally(() => setLoading(false));
+  }, [refreshTargets]);
 
   useFocusEffect(
     useCallback(() => {
-      refreshTargets().catch(() => {});
-      getProfile()
-        .then(setProfile)
-        .catch(() => setProfile(null));
-    }, []),
+      load();
+    }, [load]),
   );
 
   const targetRows: [IconName, string, string][] = [
@@ -51,6 +63,26 @@ export default function ProfileScreen() {
     ["Weight", profile ? `${formatWeightLb(profile.weight_kg)} lb` : "—"],
     ["Activity", profile ? ACTIVITY_LABEL[profile.activity_level] : "—"],
   ];
+
+  if (loading && !profile) {
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.bg }]}>
+        <ActivityIndicator color={theme.accent} />
+      </View>
+    );
+  }
+
+  if (error && !profile) {
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.bg }]}>
+        <Icon name="x" size={28} color="#ff5a5f" />
+        <Text style={[styles.errorText, { color: theme.muted, fontFamily: bodyFont(500) }]}>{error}</Text>
+        <Pressable style={[styles.retryBtn, { backgroundColor: theme.accent }]} onPress={load}>
+          <Text style={[styles.retryBtnText, { fontFamily: bodyFont(700) }]}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={{ backgroundColor: theme.bg }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -110,6 +142,10 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingHorizontal: 32 },
+  errorText: { fontSize: 14, textAlign: "center", lineHeight: 20 },
+  retryBtn: { marginTop: 4, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 14 },
+  retryBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   scroll: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 120 },
   identityRow: { flexDirection: "row", alignItems: "center", gap: 15, marginTop: 12, marginBottom: 22 },
   avatar: { width: 66, height: 66, borderRadius: 33, alignItems: "center", justifyContent: "center" },
