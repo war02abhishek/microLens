@@ -15,13 +15,13 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// TODO: gate initialRouteName on a persisted "has onboarded" flag once
-// profile data is synced with the backend — for now every launch starts
-// at Onboarding, matching the design handoff's default state.
-export default function AppNavigator() {
+// initialRoute is resolved by App.tsx before this mounts (checking for a
+// stored auth token) so a returning, already-onboarded user lands on their
+// Dashboard instead of being sent through onboarding on every cold launch.
+export default function AppNavigator({ initialRoute }: { initialRoute: "Onboarding" | "Tabs" }) {
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="Onboarding" screenOptions={{ headerShown: false }}>
+      <Stack.Navigator initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Tabs" component={TabNavigator} />
         <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ presentation: "fullScreenModal" }} />
         <Stack.Screen name="Capture" component={CaptureScreen} options={{ presentation: "fullScreenModal" }} />
