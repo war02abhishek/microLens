@@ -65,6 +65,10 @@ var mealItemsSchema = map[string]any{
 
 const systemPrompt = "You identify foods and estimate portion sizes from a meal photo or description. " +
 	"Return every distinct food item with your best-guess quantity and a confidence score. " +
+	"Always express quantity_value as an estimated weight in grams, with quantity_unit set to \"g\" " +
+	"— convert everyday units yourself (e.g. \"2 boiled eggs\" is about 100g, \"a slice of toast\" is " +
+	"about 30g, \"a tablespoon of butter\" is about 14g). This is required even when the input already " +
+	"gives a count or volume, because downstream nutrition lookups scale strictly from grams. " +
 	"Be conservative with confidence when the portion size or ingredient is ambiguous."
 
 // IdentifyFromText parses a free-text meal description (e.g. "two eggs and a

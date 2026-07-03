@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // Macros are per-100g values used to scale to a logged quantity.
@@ -36,11 +37,30 @@ func NewClient(apiKey, baseURL string) *Client {
 }
 
 // Lookup finds the best-matching food and returns its per-100g macros.
+// Tries USDA's curated generic-food datasets first (Foundation, SR Legacy)
+// — plain text search alone ranks "Branded" grocery products by text
+// relevance, which can match something like "BUTTER LETTUCE" for a query
+// of "butter". Only falls back to an unrestricted search (any data type)
+// if the curated sets have no match.
 // TODO: cache results locally (a lot of common foods repeat across users)
 // instead of hitting the external API on every meal log.
 func (c *Client) Lookup(ctx context.Context, foodName string) (*Macros, error) {
-	endpoint := fmt.Sprintf("%s/foods/search?query=%s&api_key=%s&pageSize=1",
-		c.baseURL, url.QueryEscape(foodName), c.apiKey)
+	macros, err := c.search(ctx, foodName, []string{"Foundation", "SR Legacy"})
+	if err == nil {
+		return macros, nil
+	}
+	return c.search(ctx, foodName, nil)
+}
+
+func (c *Client) search(ctx context.Context, foodName string, dataTypes []string) (*Macros, error) {
+	q := url.Values{}
+	q.Set("query", foodName)
+	q.Set("api_key", c.apiKey)
+	q.Set("pageSize", "1")
+	for _, dt := range dataTypes {
+		q.Add("dataType", dt)
+	}
+	endpoint := fmt.Sprintf("%s/foods/search?%s", c.baseURL, q.Encode())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -66,6 +86,7 @@ func (c *Client) Lookup(ctx context.Context, foodName string) (*Macros, error) {
 			Description   string `json:"description"`
 			FoodNutrients []struct {
 				NutrientName string  `json:"nutrientName"`
+				UnitName     string  `json:"unitName"`
 				Value        float64 `json:"value"`
 			} `json:"foodNutrients"`
 		} `json:"foods"`
@@ -82,7 +103,13 @@ func (c *Client) Lookup(ctx context.Context, foodName string) (*Macros, error) {
 	for _, n := range food.FoodNutrients {
 		switch n.NutrientName {
 		case "Energy":
-			macros.Calories = n.Value
+			// USDA reports Energy twice — once in kJ, once in kcal — so
+			// this must be unit-gated, not just matched by name, or the
+			// stored value is whichever unit happens to appear last in
+			// the response.
+			if strings.EqualFold(n.UnitName, "kcal") {
+				macros.Calories = n.Value
+			}
 		case "Protein":
 			macros.ProteinG = n.Value
 		case "Carbohydrate, by difference":
